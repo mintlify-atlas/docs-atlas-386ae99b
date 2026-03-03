@@ -1,0 +1,563 @@
+---
+title: Project Structure
+description: Monorepo organization and package layout for the Accountability project
+---
+
+## Monorepo Overview
+
+Accountability uses a **pnpm workspace monorepo** with four main packages. Each package has a single responsibility and explicit dependencies.
+
+```
+accountability/
+├── packages/
+│   ├── core/           # Domain logic (Effect, 100% tested)
+│   ├── persistence/    # Database layer (@effect/sql + PostgreSQL)
+│   ├── api/            # HTTP API (Effect HttpApi + OpenAPI)
+│   └── web/            # Frontend (React + TanStack Start)
+├── specs/              # Specifications and documentation
+├── repos/              # Reference repositories (git subtrees)
+├── package.json        # Workspace configuration
+├── pnpm-workspace.yaml # pnpm workspace config
+├── tsconfig.json       # Shared TypeScript config
+└── vitest.config.ts    # Test configuration
+```
+
+## Package Dependencies
+
+```
+   web
+    │
+    ├──→ api
+    │     │
+    │     ├──→ core
+    │     │     │
+    │     │     └──→ (no deps)
+    │     │
+    │     └──→ persistence
+    │           │
+    │           └──→ core
+    │
+    └──→ (openapi-fetch client generated from api)
+```
+
+<Info>
+  The `core` package has no dependencies on other packages, ensuring the domain logic is completely independent of infrastructure concerns.
+</Info>
+
+## packages/core
+
+**Purpose**: Pure domain logic, business rules, and service interfaces
+
+**Technology**: Effect, Effect Schema
+
+**Key Characteristics**:
+- 100% test coverage required
+- No external dependencies (only Effect)
+- No database code
+- No HTTP code
+- Pure business logic
+
+### Structure
+
+```
+packages/core/src/
+├── accounting/              # Chart of accounts domain
+│   ├── Account.ts           # Account entity
+│   ├── AccountId.ts         # Branded account ID
+│   ├── AccountNumber.ts     # Account number type
+│   ├── AccountBalance.ts    # Account balance calculations
+│   ├── AccountHierarchy.ts  # Account parent-child relationships
+│   ├── AccountTemplate.ts   # Standard chart of accounts templates
+│   ├── AccountValidation.ts # Account validation rules
+│   ├── BalanceValidation.ts # Trial balance validation
+│   ├── TrialBalanceService.ts  # Trial balance service
+│   └── AccountErrors.ts     # Domain errors
+├── journal/                 # Journal entries domain
+│   ├── JournalEntry.ts
+│   ├── JournalEntryLine.ts
+│   ├── EntryStatusWorkflow.ts
+│   ├── MultiCurrencyLineHandling.ts
+│   ├── JournalEntryService.ts
+│   └── JournalErrors.ts
+├── fiscal/                  # Fiscal periods domain
+│   ├── FiscalYear.ts
+│   ├── FiscalPeriod.ts
+│   ├── FiscalPeriodStatus.ts
+│   ├── FiscalPeriodType.ts
+│   ├── FiscalPeriodService.ts
+│   ├── YearEndCloseService.ts
+│   └── FiscalPeriodErrors.ts
+├── currency/                # Currency domain
+│   ├── Currency.ts
+│   ├── CurrencyCode.ts
+│   ├── ExchangeRate.ts
+│   ├── CurrencyService.ts
+│   └── CurrencyErrors.ts
+├── consolidation/           # Consolidation domain
+│   ├── ConsolidationGroup.ts
+│   ├── ConsolidationRun.ts
+│   ├── EliminationRule.ts
+│   ├── IntercompanyTransaction.ts
+│   ├── ConsolidationMethodDetermination.ts
+│   ├── ConsolidationService.ts
+│   ├── EliminationService.ts
+│   ├── IntercompanyService.ts
+│   ├── NCIService.ts
+│   └── ConsolidationErrors.ts
+├── reporting/               # Financial reporting
+│   ├── BalanceSheetService.ts
+│   ├── IncomeStatementService.ts
+│   ├── CashFlowStatementService.ts
+│   ├── EquityStatementService.ts
+│   ├── ConsolidatedReportService.ts
+│   └── ReportErrors.ts
+├── authentication/          # Authentication domain
+│   ├── AuthUser.ts
+│   ├── AuthUserId.ts
+│   ├── AuthService.ts
+│   ├── AuthProvider.ts
+│   ├── PasswordHasher.ts
+│   ├── Session.ts
+│   ├── SessionId.ts
+│   └── AuthErrors.ts
+├── authorization/           # Authorization domain
+│   ├── AuthorizationPolicy.ts
+│   ├── PolicyEngine.ts
+│   ├── AuthorizationService.ts
+│   ├── PermissionMatrix.ts
+│   ├── BaseRole.ts
+│   ├── FunctionalRole.ts
+│   └── AuthorizationErrors.ts
+├── organization/            # Organization domain
+│   ├── Organization.ts
+│   └── OrganizationErrors.ts
+├── company/                 # Company domain
+│   ├── Company.ts
+│   ├── CompanyType.ts
+│   └── CompanyErrors.ts
+├── membership/              # Organization membership
+│   ├── OrganizationMembership.ts
+│   ├── OrganizationInvitation.ts
+│   ├── OrganizationMemberService.ts
+│   ├── InvitationService.ts
+│   └── MembershipErrors.ts
+├── audit/                   # Audit logging
+│   ├── AuditLog.ts
+│   ├── AuditLogService.ts
+│   └── AuditLogErrors.ts
+├── jurisdiction/            # Jurisdictions
+│   ├── Jurisdiction.ts
+│   └── JurisdictionCode.ts
+└── shared/                  # Shared domain primitives
+    ├── values/
+    │   ├── LocalDate.ts
+    │   ├── Timestamp.ts
+    │   ├── MonetaryAmount.ts
+    │   ├── Percentage.ts
+    │   └── Address.ts
+    ├── context/
+    │   └── CurrentUserId.ts
+    └── errors/
+        ├── SharedErrors.ts
+        └── RepositoryError.ts
+```
+
+### Export Strategy
+
+**No barrel files** - Each module exported explicitly in package.json:
+
+```json
+{
+  "exports": {
+    "./accounting/Account": "./src/accounting/Account.ts",
+    "./accounting/AccountId": "./src/accounting/AccountId.ts",
+    "./journal/JournalEntry": "./src/journal/JournalEntry.ts"
+  }
+}
+```
+
+**Imports**:
+```typescript
+import { Account, AccountType } from "@accountability/core/accounting/Account"
+import { AccountId } from "@accountability/core/accounting/AccountId"
+import { JournalEntry } from "@accountability/core/journal/JournalEntry"
+```
+
+### Naming Conventions
+
+- **Entities**: PascalCase (Account, JournalEntry, Company)
+- **IDs**: EntityId (AccountId, CompanyId, JournalEntryId)
+- **Services**: EntityService (AccountService, JournalEntryService)
+- **Errors**: EntityError or EntityNotFound (AccountNotFound, ValidationError)
+
+## packages/persistence
+
+**Purpose**: Database persistence layer with repositories
+
+**Technology**: @effect/sql, @effect/sql-pg, PostgreSQL
+
+**Key Characteristics**:
+- Repository pattern for data access
+- SQL queries with Schema validation
+- Database migrations
+- Transaction support
+
+### Structure
+
+```
+packages/persistence/src/
+├── Services/                    # Repository interfaces
+│   ├── AccountRepository.ts
+│   ├── JournalEntryRepository.ts
+│   ├── JournalEntryLineRepository.ts
+│   ├── CompanyRepository.ts
+│   ├── OrganizationRepository.ts
+│   ├── FiscalPeriodRepository.ts
+│   ├── ExchangeRateRepository.ts
+│   ├── ConsolidationRepository.ts
+│   ├── IntercompanyTransactionRepository.ts
+│   ├── EliminationRuleRepository.ts
+│   ├── UserRepository.ts
+│   ├── SessionRepository.ts
+│   ├── IdentityRepository.ts
+│   ├── OrganizationMemberRepository.ts
+│   ├── InvitationRepository.ts
+│   ├── PolicyRepository.ts
+│   ├── AuthorizationAuditRepository.ts
+│   ├── AuditLogRepository.ts
+│   ├── AuthService.ts           # Auth service implementation
+│   ├── LocalAuthProvider.ts     # Local auth provider
+│   ├── GoogleAuthProvider.ts    # Google OAuth provider
+│   └── WorkOSAuthProvider.ts    # WorkOS SSO provider
+├── Layers/                      # Layer implementations
+│   ├── AccountRepositoryLive.ts
+│   ├── JournalEntryRepositoryLive.ts
+│   ├── CompanyRepositoryLive.ts
+│   ├── OrganizationRepositoryLive.ts
+│   ├── FiscalPeriodRepositoryLive.ts
+│   ├── AuthServiceLive.ts
+│   ├── PolicyEngineLive.ts
+│   ├── RepositoriesLive.ts      # Composed layer with all repos
+│   ├── MigrationsLive.ts        # Migration runner
+│   └── PgClientLive.ts          # PostgreSQL client
+├── Migrations/                  # Database migrations
+│   ├── Migration0001_CreateOrganizations.ts
+│   ├── Migration0002_CreateCompanies.ts
+│   ├── Migration0003_CreateAccounts.ts
+│   ├── Migration0004_CreateFiscalPeriods.ts
+│   ├── Migration0005_CreateJournalEntries.ts
+│   ├── Migration0006_CreateExchangeRates.ts
+│   ├── Migration0007_CreateConsolidation.ts
+│   ├── Migration0008_CreateIntercompany.ts
+│   ├── Migration0009_CreateConsolidationRuns.ts
+│   ├── Migration0010_CreateAuthUsers.ts
+│   ├── Migration0011_CreateAuthIdentities.ts
+│   ├── Migration0012_CreateAuthSessions.ts
+│   ├── Migration0013_CreateAuditLog.ts
+│   └── Migration0017_CreateAuthorization.ts
+├── Seeds/                       # Seed data
+│   └── SystemPolicies.ts        # Default authorization policies
+└── Errors/
+    └── RepositoryError.ts       # Persistence errors
+```
+
+### Repository Pattern
+
+```typescript
+export interface AccountRepository {
+  readonly findById: (
+    organizationId: OrganizationId,
+    id: AccountId
+  ) => Effect.Effect<Option.Option<Account>, PersistenceError>
+  
+  readonly findByCompany: (
+    organizationId: OrganizationId,
+    companyId: CompanyId
+  ) => Effect.Effect<ReadonlyArray<Account>, PersistenceError>
+  
+  readonly create: (
+    account: Account
+  ) => Effect.Effect<Account, PersistenceError>
+}
+
+export class AccountRepository extends Context.Tag("AccountRepository")<
+  AccountRepository,
+  AccountRepository
+>() {}
+```
+
+## packages/api
+
+**Purpose**: HTTP API layer with OpenAPI spec generation
+
+**Technology**: Effect HttpApi, HttpApiBuilder
+
+**Key Characteristics**:
+- Type-safe HTTP endpoints
+- Automatic OpenAPI generation
+- Middleware for auth/logging
+- Error mapping to HTTP status codes
+
+### Structure
+
+```
+packages/api/src/
+├── Definitions/                 # API definitions
+│   ├── AppApi.ts                # Root API composition
+│   ├── AuthApi.ts               # Authentication endpoints
+│   ├── AccountsApi.ts           # Accounts endpoints
+│   ├── CompaniesApi.ts          # Companies endpoints
+│   ├── JournalEntriesApi.ts     # Journal entries endpoints
+│   ├── FiscalPeriodsApi.ts      # Fiscal periods endpoints
+│   ├── CurrencyApi.ts           # Currency endpoints
+│   ├── ConsolidationApi.ts      # Consolidation endpoints
+│   ├── EliminationRulesApi.ts   # Elimination rules endpoints
+│   ├── IntercompanyTransactionsApi.ts  # Intercompany endpoints
+│   ├── ReportsApi.ts            # Reporting endpoints
+│   ├── AuthMiddleware.ts        # Auth middleware
+│   └── ApiErrors.ts             # API-level errors
+└── Layers/                      # API implementations
+    ├── AppApiLive.ts            # Full API composition
+    ├── AuthApiLive.ts
+    ├── AccountsApiLive.ts
+    ├── CompaniesApiLive.ts
+    ├── JournalEntriesApiLive.ts
+    ├── FiscalPeriodsApiLive.ts
+    ├── CurrencyApiLive.ts
+    ├── ConsolidationApiLive.ts
+    ├── EliminationRulesApiLive.ts
+    ├── IntercompanyTransactionsApiLive.ts
+    ├── ReportsApiLive.ts
+    ├── AuthMiddlewareLive.ts
+    └── OrganizationContextMiddlewareLive.ts
+```
+
+### API Definition Pattern
+
+```typescript
+// Definitions/AccountsApi.ts
+const findById = HttpApiEndpoint.get("findById", "/accounts/:id")
+  .setPath(Schema.Struct({ id: AccountId }))
+  .addSuccess(Account)
+  .addError(NotFoundError, { status: 404 })
+
+class AccountsApi extends HttpApiGroup.make("accounts")
+  .add(findById)
+  .add(create)
+  .add(update)
+  .prefix("/api/v1")
+  .middleware(AuthMiddleware)
+{}
+
+// Layers/AccountsApiLive.ts
+export const AccountsApiLive = HttpApiBuilder.group(
+  AppApi,
+  "accounts",
+  (handlers) => handlers.handle("findById", ({ path }) =>
+    Effect.gen(function* () {
+      const service = yield* AccountService
+      return yield* service.findById(path.id)
+    })
+  )
+)
+```
+
+## packages/web
+
+**Purpose**: React frontend with SSR
+
+**Technology**: React, TanStack Start, openapi-fetch, Tailwind CSS
+
+**Key Characteristics**:
+- No Effect code (pure React)
+- File-based routing
+- SSR with loaders
+- Type-safe API client
+
+### Structure
+
+```
+packages/web/src/
+├── routes/                      # File-based routes
+│   ├── __root.tsx               # Root layout
+│   ├── index.tsx                # Home page
+│   ├── login.tsx                # Login page
+│   ├── register.tsx             # Registration page
+│   └── organizations/           # Organization routes
+│       ├── index.tsx            # List organizations
+│       ├── new.tsx              # Create organization
+│       └── $organizationId/     # Nested routes
+│           ├── route.tsx        # Organization layout
+│           ├── dashboard.tsx    # Dashboard
+│           ├── companies/
+│           │   ├── index.tsx    # List companies
+│           │   ├── new.tsx      # Create company
+│           │   └── $companyId/  # Company routes
+│           │       ├── index.tsx
+│           │       ├── accounts/
+│           │       ├── journal-entries/
+│           │       ├── fiscal-periods/
+│           │       └── reports/
+│           ├── consolidation/
+│           ├── intercompany/
+│           ├── exchange-rates/
+│           ├── audit-log/
+│           └── settings/
+├── components/                  # Reusable components
+│   ├── ui/                      # Base UI components
+│   │   ├── Button.tsx
+│   │   ├── Input.tsx
+│   │   ├── Select.tsx
+│   │   ├── Dialog.tsx
+│   │   ├── Table.tsx
+│   │   └── Badge.tsx
+│   ├── layout/                  # Layout components
+│   │   ├── AppLayout.tsx
+│   │   ├── Sidebar.tsx
+│   │   ├── Header.tsx
+│   │   └── Breadcrumbs.tsx
+│   ├── accounts/                # Account-specific components
+│   ├── journal-entries/         # Journal entry components
+│   └── reports/                 # Report components
+├── api/                         # API client
+│   ├── client.ts                # openapi-fetch client
+│   └── generated/               # Generated types
+│       └── api-schema.ts        # OpenAPI TypeScript types
+├── utils/                       # Utility functions
+│   ├── format.ts                # Formatting helpers
+│   ├── validation.ts            # Validation helpers
+│   └── date.ts                  # Date utilities
+├── hooks/                       # Custom React hooks
+│   ├── useDebounce.ts
+│   └── useLocalStorage.ts
+└── styles/
+    └── index.css                # Global styles + Tailwind
+```
+
+### Route Pattern
+
+```tsx
+// routes/organizations/$organizationId/companies/index.tsx
+export const Route = createFileRoute(
+  "/organizations/$organizationId/companies/"
+)({
+  loader: async ({ request, params }) => {
+    const cookie = request.headers.get("cookie")
+    const { data } = await api.GET("/api/v1/companies", {
+      params: { query: { organizationId: params.organizationId } },
+      headers: cookie ? { cookie } : undefined
+    })
+    return { companies: data ?? [] }
+  },
+  component: CompaniesPage
+})
+
+function CompaniesPage() {
+  const { companies } = Route.useLoaderData()
+  const router = useRouter()
+  
+  return (
+    <div>
+      <Header title="Companies" />
+      {companies.length === 0 ? (
+        <EmptyState
+          title="No companies yet"
+          action={<Button onClick={() => router.navigate({ to: "./new" })}>Create Company</Button>}
+        />
+      ) : (
+        <CompanyList companies={companies} />
+      )}
+    </div>
+  )
+}
+```
+
+## specs/
+
+**Purpose**: Specifications, guides, and architectural documentation
+
+```
+specs/
+├── guides/                      # Consolidated guides
+│   ├── effect-guide.md          # Effect patterns
+│   ├── testing-guide.md         # Testing strategy
+│   ├── frontend-guide.md        # Frontend patterns
+│   └── api-guide.md             # API patterns
+├── architecture/                # Architecture specs
+│   ├── accounting-research.md   # Domain model
+│   ├── authentication.md        # Auth system
+│   ├── authorization.md         # RBAC/ABAC
+│   ├── error-design.md          # Error handling
+│   └── fiscal-periods.md        # Fiscal periods
+├── pending/                     # Pending features
+├── completed/                   # Completed features
+└── reference/                   # Reference docs
+```
+
+## Root Configuration Files
+
+### package.json
+
+```json
+{
+  "name": "accountability",
+  "private": true,
+  "packageManager": "pnpm@10.17.1",
+  "scripts": {
+    "dev": "pnpm --filter @accountability/web run dev",
+    "build": "pnpm --filter @accountability/web run build",
+    "test": "vitest run",
+    "typecheck": "tsc -b tsconfig.json"
+  }
+}
+```
+
+### pnpm-workspace.yaml
+
+```yaml
+packages:
+  - 'packages/*'
+```
+
+### tsconfig.json
+
+```json
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "exactOptionalPropertyTypes": true,
+    "skipLibCheck": true
+  }
+}
+```
+
+## Development Workflow
+
+### Adding a New Feature
+
+1. **Core**: Define entity in `packages/core/src/{domain}/`
+2. **Persistence**: Add repository in `packages/persistence/src/Services/`
+3. **Persistence**: Add migration in `packages/persistence/src/Migrations/`
+4. **API**: Add endpoint in `packages/api/src/Definitions/`
+5. **API**: Implement handler in `packages/api/src/Layers/`
+6. **Web**: Regenerate API client: `pnpm --filter @accountability/web generate:api`
+7. **Web**: Add route/component in `packages/web/src/routes/`
+8. **Test**: Add tests at each layer
+
+### File Naming Conventions
+
+- **PascalCase**: Component files, entity files (Account.ts, Button.tsx)
+- **camelCase**: Utility files, hook files (format.ts, useDebounce.ts)
+- **kebab-case**: Route files ($organization-id/companies/index.tsx)
+- **UPPER_CASE**: Constants, environment variables (API_BASE_URL)
+
+## Next Steps
+
+- [Effect Framework](/architecture/effect-framework) - Effect patterns in core/persistence/api
+- [Domain Model](/architecture/domain-model) - Business entities and logic
+- [Persistence](/architecture/persistence) - Database patterns
+- [Frontend Architecture](/architecture/frontend-architecture) - React patterns

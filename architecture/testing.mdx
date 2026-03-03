@@ -1,0 +1,620 @@
+---
+title: Testing Strategy
+description: Unit, integration, and E2E testing patterns for the Accountability project
+---
+
+## Overview
+
+Accountability has a comprehensive testing strategy covering three levels:
+
+1. **Unit Tests**: Pure logic, domain entities, services
+2. **Integration Tests**: Services + database (testcontainers)
+3. **E2E Tests**: Full user flows in browser (Playwright)
+
+## Test Pyramid
+
+```
+       ┌─────────────┐
+       │  E2E Tests  │  ~50 tests (critical flows)
+       │             │  Playwright
+       └─────────────┘
+      ┌───────────────┐
+      │ Integration   │  ~100 tests (services + DB)
+      │   Tests       │  Vitest + testcontainers
+      └───────────────┘
+    ┌─────────────────┐
+    │   Unit Tests    │  ~500 tests (pure logic)
+    │                 │  @effect/vitest
+    └─────────────────┘
+```
+
+**Coverage Goals**:
+- Core package: 100%
+- Persistence: 90%
+- API: 80%
+- E2E: All critical user flows
+
+## Unit Tests (@effect/vitest)
+
+### Basic Test Structure
+
+```typescript
+import { describe, it, expect } from "@effect/vitest"
+import { Effect } from "effect"
+import { Account } from "@accountability/core/accounting/Account"
+
+describe("Account", () => {
+  it.effect("creates valid account", () =>
+    Effect.gen(function* () {
+      const account = Account.make({
+        id: AccountId.make("acc_123"),
+        name: "Cash",
+        accountType: "Asset",
+        accountNumber: AccountNumber.make("1000"),
+        // ...
+      })
+      
+      expect(account.name).toBe("Cash")
+      expect(account.isBalanceSheet).toBe(true)
+      expect(account.isProfitLoss).toBe(false)
+    })
+  )
+})
+```
+
+### Test Variants
+
+#### it.effect - Most Tests
+
+**Use for**: Tests with Effect code, TestClock for fast time.
+
+```typescript
+it.effect("processes delayed task", () =>
+  Effect.gen(function* () {
+    const fiber = yield* Effect.fork(
+      Effect.sleep(Duration.minutes(5)).pipe(
+        Effect.map(() => "completed")
+      )
+    )
+    
+    // Fast-forward time (no real waiting!)
+    yield* TestClock.adjust(Duration.minutes(5))
+    
+    const result = yield* Fiber.join(fiber)
+    expect(result).toBe("completed")
+  })
+)
+```
+
+#### it.live - Real Time/IO
+
+**Use for**: Tests needing real time or actual IO.
+
+```typescript
+it.live("fetches from real API", () =>
+  Effect.gen(function* () {
+    const response = yield* Effect.tryPromise(() =>
+      fetch("https://api.exchangerate-api.com/v4/latest/USD")
+    )
+    expect(response.status).toBe(200)
+  }), { timeout: 10000 }
+)
+```
+
+#### it.scoped - Resource Management
+
+**Use for**: Tests with resources needing cleanup.
+
+```typescript
+it.scoped("manages database connection", () =>
+  Effect.gen(function* () {
+    const connection = yield* acquireDatabaseConnection()
+    // Connection automatically released after test
+    const result = yield* connection.query("SELECT 1")
+    expect(result).toBeDefined()
+  })
+)
+```
+
+### Sharing Layers Between Tests
+
+```typescript
+import { layer } from "@effect/vitest"
+
+const TestLayer = Layer.mergeAll(
+  AccountRepositoryLive,
+  CompanyRepositoryLive
+).pipe(
+  Layer.provideMerge(TestPgClientLive)
+)
+
+layer(TestLayer)("AccountRepository", (it) => {
+  it.effect("creates account", () =>
+    Effect.gen(function* () {
+      const repo = yield* AccountRepository
+      const account = yield* repo.create(testAccount)
+      expect(account.id).toBeDefined()
+    })
+  )
+  
+  it.effect("finds account by id", () =>
+    Effect.gen(function* () {
+      const repo = yield* AccountRepository
+      const account = yield* repo.create(testAccount)
+      const found = yield* repo.findById(orgId, account.id)
+      expect(Option.isSome(found)).toBe(true)
+    })
+  )
+})
+```
+
+### Property-Based Testing
+
+```typescript
+import { FastCheck } from "effect"
+
+it.effect.prop(
+  "account number validation",
+  [FastCheck.integer({ min: 1000, max: 9999 })],
+  ([accountNumber]) =>
+    Effect.gen(function* () {
+      const account = Account.make({
+        accountNumber: AccountNumber.make(String(accountNumber)),
+        accountType: "Asset",
+        // ...
+      })
+      
+      expect(parseInt(account.accountNumber)).toBeGreaterThanOrEqual(1000)
+      expect(parseInt(account.accountNumber)).toBeLessThanOrEqual(9999)
+    })
+)
+```
+
+## Integration Tests (Database)
+
+### Testcontainers Setup
+
+#### Global Setup
+
+```typescript
+// vitest.global-setup.ts
+import { PostgreSqlContainer } from "@testcontainers/postgresql"
+
+let container: PostgreSqlContainer
+
+export async function setup({ provide }) {
+  container = await new PostgreSqlContainer("postgres:alpine").start()
+  provide("dbUrl", container.getConnectionUri())
+}
+
+export async function teardown() {
+  await container?.stop()
+}
+```
+
+#### Shared Layer
+
+```typescript
+// test/utils.ts
+import { inject } from "vitest"
+import { PgClient } from "@effect/sql-pg"
+import { Layer, Effect, Redacted } from "effect"
+
+export const SharedPgClientLive = Layer.effect(
+  PgClient.PgClient,
+  Effect.gen(function*() {
+    const url = inject("dbUrl") as string
+    return yield* PgClient.make({ url: Redacted.make(url) })
+  })
+)
+```
+
+### Repository Tests
+
+```typescript
+import { layer } from "@effect/vitest"
+import { AccountRepository } from "@accountability/persistence/Services/AccountRepository"
+import { AccountRepositoryLive } from "@accountability/persistence/Layers/AccountRepositoryLive"
+import { MigrationsLive } from "@accountability/persistence/Layers/MigrationsLive"
+import { SharedPgClientLive } from "../test/utils"
+
+const TestLayer = Layer.mergeAll(
+  AccountRepositoryLive,
+  MigrationsLive
+).pipe(
+  Layer.provideMerge(SharedPgClientLive)
+)
+
+layer(TestLayer, { timeout: "30 seconds" })("AccountRepository", (it) => {
+  const testOrg = OrganizationId.make("org_test")
+  const testCompany = CompanyId.make("comp_test")
+  
+  it.effect("creates and retrieves account", () =>
+    Effect.gen(function* () {
+      const repo = yield* AccountRepository
+      
+      const account = Account.make({
+        id: AccountId.make("acc_test"),
+        companyId: testCompany,
+        accountNumber: AccountNumber.make("1000"),
+        name: "Cash",
+        accountType: "Asset",
+        category: "CurrentAsset",
+        normalBalance: "Debit",
+        isActive: true,
+        allowManualEntries: true,
+        parentAccountId: Option.none(),
+        level: 0,
+        createdAt: Timestamp.now(),
+        updatedAt: Timestamp.now()
+      })
+      
+      yield* repo.create(account)
+      
+      const found = yield* repo.findById(testOrg, account.id)
+      expect(Option.isSome(found)).toBe(true)
+      
+      if (Option.isSome(found)) {
+        expect(found.value.name).toBe("Cash")
+      }
+    })
+  )
+  
+  it.effect("prevents duplicate account numbers", () =>
+    Effect.gen(function* () {
+      const repo = yield* AccountRepository
+      
+      const account1 = Account.make({
+        id: AccountId.make("acc_1"),
+        companyId: testCompany,
+        accountNumber: AccountNumber.make("1000"),
+        name: "Cash",
+        // ...
+      })
+      
+      yield* repo.create(account1)
+      
+      const account2 = Account.make({
+        id: AccountId.make("acc_2"),
+        companyId: testCompany,
+        accountNumber: AccountNumber.make("1000"), // Duplicate!
+        name: "Cash 2",
+        // ...
+      })
+      
+      const result = yield* Effect.either(repo.create(account2))
+      expect(Either.isLeft(result)).toBe(true)
+    })
+  )
+})
+```
+
+### Transaction Tests
+
+```typescript
+it.effect("rolls back on error", () =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient
+    const repo = yield* AccountRepository
+    
+    const result = yield* Effect.either(
+      sql.withTransaction(
+        Effect.gen(function* () {
+          // Create account
+          const account = yield* repo.create(testAccount)
+          
+          // This will fail (violates constraint)
+          yield* sql`INSERT INTO accounts (id, company_id, account_number, name) 
+                     VALUES ('acc_123', 'invalid_company', '1000', 'Test')`
+        })
+      )
+    )
+    
+    expect(Either.isLeft(result)).toBe(true)
+    
+    // Verify account was rolled back
+    const found = yield* repo.findById(testOrg, testAccount.id)
+    expect(Option.isNone(found)).toBe(true)
+  })
+)
+```
+
+## E2E Tests (Playwright)
+
+### Configuration
+
+```typescript
+// playwright.config.ts
+import { defineConfig } from "@playwright/test"
+
+export default defineConfig({
+  testDir: "./tests",
+  fullyParallel: false,  // Sequential for shared DB
+  workers: 1,
+  retries: process.env.CI ? 2 : 0,
+  
+  use: {
+    baseURL: "http://localhost:3333",
+    trace: "on-first-retry",
+    screenshot: "only-on-failure",
+    actionTimeout: 10000,
+    navigationTimeout: 30000,
+  },
+  
+  webServer: {
+    command: "pnpm build && pnpm preview --port 3333",
+    url: "http://localhost:3333",
+    reuseExistingServer: !process.env.CI,
+    timeout: 120000,
+  },
+})
+```
+
+### Authentication Fixture
+
+```typescript
+// tests/fixtures/auth.ts
+import { test as base } from "@playwright/test"
+
+export interface TestUser {
+  id: string
+  email: string
+  password: string
+  token: string
+}
+
+interface AuthFixtures {
+  testUser: TestUser
+  authenticatedPage: Page
+}
+
+function generateTestCredentials() {
+  const timestamp = Date.now()
+  const random = Math.random().toString(36).slice(2, 8)
+  return {
+    email: `test-${timestamp}-${random}@example.com`,
+    password: `SecureP@ss${timestamp}!`,
+    displayName: `Test User ${random}`,
+  }
+}
+
+export const test = base.extend<AuthFixtures>({
+  testUser: async ({ page }, use) => {
+    const credentials = generateTestCredentials()
+    
+    // Register user
+    await page.goto("/register")
+    await page.fill('[data-testid="email-input"]', credentials.email)
+    await page.fill('[data-testid="password-input"]', credentials.password)
+    await page.fill('[data-testid="display-name-input"]', credentials.displayName)
+    await page.click('[data-testid="register-button"]')
+    
+    await page.waitForURL("/")
+    
+    // Extract token from cookie
+    const cookies = await page.context().cookies()
+    const sessionCookie = cookies.find(c => c.name === "accountability_session")
+    
+    await use({
+      id: "user_generated",
+      email: credentials.email,
+      password: credentials.password,
+      token: sessionCookie!.value
+    })
+  },
+  
+  authenticatedPage: async ({ page, testUser }, use) => {
+    // Set auth cookie
+    await page.context().addCookies([{
+      name: "accountability_session",
+      value: testUser.token,
+      domain: "localhost",
+      path: "/",
+      httpOnly: true,
+      sameSite: "Strict"
+    }])
+    
+    await page.goto("/")
+    await use(page)
+  },
+})
+```
+
+### Test Patterns
+
+#### CRITICAL: Use data-testid
+
+<Warning>
+  **ALL element selection in E2E tests MUST use `data-testid` attributes.** Never use CSS classes, text content, or structural selectors.
+</Warning>
+
+```tsx
+// Component with data-testid
+function LoginForm() {
+  return (
+    <form data-testid="login-form">
+      <input data-testid="login-email-input" type="email" />
+      <input data-testid="login-password-input" type="password" />
+      <button data-testid="login-submit-button" type="submit">
+        Log In
+      </button>
+    </form>
+  )
+}
+
+// Test using data-testid
+import { test, expect } from "./fixtures/auth"
+
+test("should login with valid credentials", async ({ page, testUser }) => {
+  await page.goto("/login")
+  
+  // CORRECT: Use data-testid
+  await page.fill('[data-testid="login-email-input"]', testUser.email)
+  await page.fill('[data-testid="login-password-input"]', testUser.password)
+  await page.click('[data-testid="login-submit-button"]')
+  
+  await page.waitForURL("/")
+  await expect(page.locator('[data-testid="user-menu"]')).toBeVisible()
+})
+```
+
+#### User Flow Tests
+
+```typescript
+import { test, expect } from "./fixtures/auth"
+
+test("should create company and add account", async ({ authenticatedPage, testOrg }) => {
+  // Navigate to companies
+  await authenticatedPage.goto(`/organizations/${testOrg.id}/companies`)
+  
+  // Create company
+  await authenticatedPage.click('[data-testid="new-company-button"]')
+  
+  const companyName = `Test Company ${Date.now()}`
+  await authenticatedPage.fill('[data-testid="company-name-input"]', companyName)
+  await authenticatedPage.selectOption('[data-testid="currency-select"]', "USD")
+  await authenticatedPage.click('[data-testid="submit-button"]')
+  
+  // Verify company created
+  await expect(authenticatedPage.locator(`text=${companyName}`)).toBeVisible()
+  
+  // Add account to company
+  await authenticatedPage.click('[data-testid="accounts-tab"]')
+  await authenticatedPage.click('[data-testid="new-account-button"]')
+  
+  await authenticatedPage.fill('[data-testid="account-number-input"]', "1000")
+  await authenticatedPage.fill('[data-testid="account-name-input"]', "Cash")
+  await authenticatedPage.selectOption('[data-testid="account-type-select"]', "Asset")
+  await authenticatedPage.click('[data-testid="submit-button"]')
+  
+  // Verify account created
+  await expect(authenticatedPage.locator('text=Cash')).toBeVisible()
+  await expect(authenticatedPage.locator('text=1000')).toBeVisible()
+})
+```
+
+#### Use API for Setup, UI for Assertions
+
+```typescript
+test("should display journal entry", async ({ authenticatedPage, testUser, testCompany }) => {
+  // Setup via API (fast)
+  const { data } = await fetch(`http://localhost:3333/api/v1/journal-entries`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "Cookie": `accountability_session=${testUser.token}`
+    },
+    body: JSON.stringify({
+      companyId: testCompany.id,
+      entryDate: "2024-03-01",
+      description: "Test Entry",
+      lines: [
+        { accountId: "acc_1", debit: 100, credit: 0 },
+        { accountId: "acc_2", debit: 0, credit: 100 }
+      ]
+    })
+  }).then(r => r.json())
+  
+  // Verify in UI
+  await authenticatedPage.goto(`/companies/${testCompany.id}/journal-entries`)
+  await expect(authenticatedPage.locator('text=Test Entry')).toBeVisible()
+})
+```
+
+## Running Tests
+
+### Unit/Integration Tests
+
+```bash
+# Run all tests (minimal output)
+pnpm test
+
+# Run with full output
+pnpm test:verbose
+
+# Run with coverage
+pnpm test:coverage
+
+# Run specific package
+pnpm --filter @accountability/core test
+
+# Run specific test file
+pnpm test packages/core/test/Account.test.ts
+
+# Watch mode
+pnpm test --watch
+```
+
+### E2E Tests
+
+```bash
+# Run all E2E tests
+pnpm test:e2e
+
+# Run with full output
+pnpm test:e2e:verbose
+
+# Run in headed mode (see browser)
+pnpm test:e2e --headed
+
+# Run specific test
+pnpm test:e2e --grep "login"
+
+# Debug specific test
+pnpm test:e2e --debug tests/auth/login.spec.ts
+
+# Interactive UI
+pnpm test:e2e:ui
+
+# View report
+pnpm test:e2e:report
+```
+
+## Test Organization
+
+### Directory Structure
+
+```
+packages/
+  core/
+    src/
+      accounting/
+        Account.ts
+    test/
+      accounting/
+        Account.test.ts
+        
+  persistence/
+    src/
+      Services/
+        AccountRepository.ts
+    test/
+      AccountRepository.test.ts
+      
+  web/
+    tests/
+      auth/
+        login.spec.ts
+        register.spec.ts
+      companies/
+        companies.spec.ts
+      journal-entries/
+        workflow.spec.ts
+      fixtures/
+        auth.ts
+        organizations.ts
+```
+
+### Naming Conventions
+
+- Unit/Integration: `*.test.ts`
+- E2E: `*.spec.ts`
+- Test data: Use `test` prefix (testAccount, testOrg)
+- Fixtures: Organize by feature in `fixtures/`
+
+## Next Steps
+
+- [Effect Framework](/architecture/effect-framework) - Testing Effect code
+- [Persistence](/architecture/persistence) - Database testing
+- [Frontend Architecture](/architecture/frontend-architecture) - Component testing
+- [Error Handling](/architecture/error-handling) - Testing error scenarios

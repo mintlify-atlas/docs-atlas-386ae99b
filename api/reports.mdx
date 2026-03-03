@@ -1,0 +1,502 @@
+---
+title: Reports API
+description: Generate financial reports including Trial Balance, Balance Sheet, Income Statement, Cash Flow, and Equity Statement
+---
+
+# Reports API
+
+The Reports API provides endpoints for generating financial reports per US GAAP standards (ASC 210, 220, 230).
+
+## Base Path
+
+```
+/api/v1/reports
+```
+
+All endpoints require authentication with a valid session token.
+
+## Report Formats
+
+All reports support multiple output formats:
+
+- `json` - Structured JSON (default)
+- `pdf` - PDF document
+- `excel` - Excel spreadsheet
+- `csv` - CSV export
+
+## Trial Balance
+
+Generate a trial balance report showing all account balances with total debits and credits.
+
+```bash GET /api/v1/reports/trial-balance
+curl -X GET "https://your-instance.accountability.app/api/v1/reports/trial-balance?organizationId={orgId}&companyId={companyId}&asOfDate=2025-03-31" \
+  -H "Authorization: Bearer your-session-token"
+```
+
+<ParamField query="organizationId" type="string" required>
+  Organization UUID
+</ParamField>
+
+<ParamField query="companyId" type="string" required>
+  Company UUID
+</ParamField>
+
+<ParamField query="asOfDate" type="string" required>
+  Report date (ISO 8601: YYYY-MM-DD)
+</ParamField>
+
+<ParamField query="periodStartDate" type="string">
+  Optional period start date for activity filtering
+</ParamField>
+
+<ParamField query="excludeZeroBalances" type="boolean" default="false">
+  Exclude accounts with zero balance
+</ParamField>
+
+<ParamField query="format" type="enum" default="json">
+  Output format: `json`, `pdf`, `excel`, `csv`
+</ParamField>
+
+<ResponseExample>
+```json
+{
+  "companyId": "comp_123e4567-e89b-12d3-a456-426614174000",
+  "asOfDate": "2025-03-31",
+  "currency": "USD",
+  "generatedAt": "2025-04-01T10:00:00Z",
+  "lineItems": [
+    {
+      "accountId": "acc_1000",
+      "accountNumber": "1000",
+      "accountName": "Cash - Operating",
+      "accountType": "Asset",
+      "debitBalance": { "value": "150000.00", "currency": "USD" },
+      "creditBalance": { "value": "0.00", "currency": "USD" }
+    },
+    {
+      "accountId": "acc_2000",
+      "accountNumber": "2000",
+      "accountName": "Accounts Payable",
+      "accountType": "Liability",
+      "debitBalance": { "value": "0.00", "currency": "USD" },
+      "creditBalance": { "value": "50000.00", "currency": "USD" }
+    }
+  ],
+  "totalDebits": { "value": "1500000.00", "currency": "USD" },
+  "totalCredits": { "value": "1500000.00", "currency": "USD" },
+  "isBalanced": true
+}
+```
+</ResponseExample>
+
+<Note>
+The report validates that debits equal credits. If `isBalanced` is false, there is a data integrity issue that must be resolved.
+</Note>
+
+## Balance Sheet
+
+Generate a balance sheet per ASC 210 showing Assets, Liabilities, and Equity at a point in time.
+
+```bash GET /api/v1/reports/balance-sheet
+curl -X GET "https://your-instance.accountability.app/api/v1/reports/balance-sheet?organizationId={orgId}&companyId={companyId}&asOfDate=2025-03-31&comparativeDate=2024-12-31" \
+  -H "Authorization: Bearer your-session-token"
+```
+
+<ParamField query="organizationId" type="string" required>
+  Organization UUID
+</ParamField>
+
+<ParamField query="companyId" type="string" required>
+  Company UUID
+</ParamField>
+
+<ParamField query="asOfDate" type="string" required>
+  Report date (ISO 8601: YYYY-MM-DD)
+</ParamField>
+
+<ParamField query="comparativeDate" type="string">
+  Optional comparative period date for variance analysis
+</ParamField>
+
+<ParamField query="includeZeroBalances" type="boolean" default="false">
+  Include accounts with zero balance
+</ParamField>
+
+<ParamField query="format" type="enum" default="json">
+  Output format: `json`, `pdf`, `excel`, `csv`
+</ParamField>
+
+<ResponseExample>
+```json
+{
+  "companyId": "comp_123e4567-e89b-12d3-a456-426614174000",
+  "asOfDate": "2025-03-31",
+  "comparativeDate": "2024-12-31",
+  "currency": "USD",
+  "generatedAt": "2025-04-01T10:00:00Z",
+  "currentAssets": {
+    "title": "Current Assets",
+    "lineItems": [
+      {
+        "accountId": "acc_1000",
+        "accountNumber": "1000",
+        "description": "Cash and Cash Equivalents",
+        "currentAmount": { "value": "150000.00", "currency": "USD" },
+        "comparativeAmount": { "value": "120000.00", "currency": "USD" },
+        "variance": { "value": "30000.00", "currency": "USD" },
+        "variancePercentage": 25.0,
+        "style": "Normal",
+        "indentLevel": 0
+      }
+    ],
+    "subtotal": { "value": "500000.00", "currency": "USD" },
+    "comparativeSubtotal": { "value": "450000.00", "currency": "USD" }
+  },
+  "nonCurrentAssets": {
+    "title": "Non-Current Assets",
+    "lineItems": [],
+    "subtotal": { "value": "300000.00", "currency": "USD" },
+    "comparativeSubtotal": { "value": "300000.00", "currency": "USD" }
+  },
+  "totalAssets": { "value": "800000.00", "currency": "USD" },
+  "currentLiabilities": {
+    "title": "Current Liabilities",
+    "lineItems": [],
+    "subtotal": { "value": "200000.00", "currency": "USD" },
+    "comparativeSubtotal": { "value": "180000.00", "currency": "USD" }
+  },
+  "nonCurrentLiabilities": {
+    "title": "Non-Current Liabilities",
+    "lineItems": [],
+    "subtotal": { "value": "100000.00", "currency": "USD" },
+    "comparativeSubtotal": { "value": "100000.00", "currency": "USD" }
+  },
+  "totalLiabilities": { "value": "300000.00", "currency": "USD" },
+  "equity": {
+    "title": "Shareholders' Equity",
+    "lineItems": [],
+    "subtotal": { "value": "500000.00", "currency": "USD" },
+    "comparativeSubtotal": { "value": "470000.00", "currency": "USD" }
+  },
+  "totalEquity": { "value": "500000.00", "currency": "USD" },
+  "totalLiabilitiesAndEquity": { "value": "800000.00", "currency": "USD" },
+  "isBalanced": true
+}
+```
+</ResponseExample>
+
+<Warning>
+If `isBalanced` is false, Assets ≠ Liabilities + Equity. This indicates a data integrity issue.
+</Warning>
+
+## Income Statement
+
+Generate an income statement per ASC 220 showing Revenue, Expenses, and Net Income for a period.
+
+```bash GET /api/v1/reports/income-statement
+curl -X GET "https://your-instance.accountability.app/api/v1/reports/income-statement?organizationId={orgId}&companyId={companyId}&periodStartDate=2025-01-01&periodEndDate=2025-03-31" \
+  -H "Authorization: Bearer your-session-token"
+```
+
+<ParamField query="organizationId" type="string" required>
+  Organization UUID
+</ParamField>
+
+<ParamField query="companyId" type="string" required>
+  Company UUID
+</ParamField>
+
+<ParamField query="periodStartDate" type="string" required>
+  Period start date (ISO 8601: YYYY-MM-DD)
+</ParamField>
+
+<ParamField query="periodEndDate" type="string" required>
+  Period end date (ISO 8601: YYYY-MM-DD)
+</ParamField>
+
+<ParamField query="comparativeStartDate" type="string">
+  Optional comparative period start date
+</ParamField>
+
+<ParamField query="comparativeEndDate" type="string">
+  Optional comparative period end date
+</ParamField>
+
+<ParamField query="format" type="enum" default="json">
+  Output format: `json`, `pdf`, `excel`, `csv`
+</ParamField>
+
+<ResponseExample>
+```json
+{
+  "companyId": "comp_123e4567-e89b-12d3-a456-426614174000",
+  "periodStartDate": "2025-01-01",
+  "periodEndDate": "2025-03-31",
+  "comparativeStartDate": "2024-01-01",
+  "comparativeEndDate": "2024-03-31",
+  "currency": "USD",
+  "generatedAt": "2025-04-01T10:00:00Z",
+  "revenue": {
+    "title": "Revenue",
+    "lineItems": [],
+    "subtotal": { "value": "1500000.00", "currency": "USD" },
+    "comparativeSubtotal": { "value": "1200000.00", "currency": "USD" }
+  },
+  "costOfSales": {
+    "title": "Cost of Sales",
+    "lineItems": [],
+    "subtotal": { "value": "900000.00", "currency": "USD" },
+    "comparativeSubtotal": { "value": "750000.00", "currency": "USD" }
+  },
+  "grossProfit": { "value": "600000.00", "currency": "USD" },
+  "operatingExpenses": {
+    "title": "Operating Expenses",
+    "lineItems": [],
+    "subtotal": { "value": "400000.00", "currency": "USD" },
+    "comparativeSubtotal": { "value": "350000.00", "currency": "USD" }
+  },
+  "operatingIncome": { "value": "200000.00", "currency": "USD" },
+  "otherIncomeExpense": {
+    "title": "Other Income (Expense)",
+    "lineItems": [],
+    "subtotal": { "value": "-10000.00", "currency": "USD" },
+    "comparativeSubtotal": { "value": "-5000.00", "currency": "USD" }
+  },
+  "incomeBeforeTax": { "value": "190000.00", "currency": "USD" },
+  "taxExpense": { "value": "40000.00", "currency": "USD" },
+  "netIncome": { "value": "150000.00", "currency": "USD" }
+}
+```
+</ResponseExample>
+
+## Cash Flow Statement
+
+Generate a cash flow statement per ASC 230 showing Operating, Investing, and Financing activities.
+
+```bash GET /api/v1/reports/cash-flow
+curl -X GET "https://your-instance.accountability.app/api/v1/reports/cash-flow?organizationId={orgId}&companyId={companyId}&periodStartDate=2025-01-01&periodEndDate=2025-03-31&method=indirect" \
+  -H "Authorization: Bearer your-session-token"
+```
+
+<ParamField query="organizationId" type="string" required>
+  Organization UUID
+</ParamField>
+
+<ParamField query="companyId" type="string" required>
+  Company UUID
+</ParamField>
+
+<ParamField query="periodStartDate" type="string" required>
+  Period start date (ISO 8601: YYYY-MM-DD)
+</ParamField>
+
+<ParamField query="periodEndDate" type="string" required>
+  Period end date (ISO 8601: YYYY-MM-DD)
+</ParamField>
+
+<ParamField query="method" type="enum" default="indirect">
+  Cash flow method: `direct` or `indirect` per ASC 230
+</ParamField>
+
+<ParamField query="format" type="enum" default="json">
+  Output format: `json`, `pdf`, `excel`, `csv`
+</ParamField>
+
+<ResponseExample>
+```json
+{
+  "companyId": "comp_123e4567-e89b-12d3-a456-426614174000",
+  "periodStartDate": "2025-01-01",
+  "periodEndDate": "2025-03-31",
+  "currency": "USD",
+  "generatedAt": "2025-04-01T10:00:00Z",
+  "method": "indirect",
+  "beginningCash": { "value": "120000.00", "currency": "USD" },
+  "operatingActivities": {
+    "title": "Cash Flows from Operating Activities",
+    "lineItems": [
+      {
+        "description": "Net Income",
+        "amount": { "value": "150000.00", "currency": "USD" },
+        "comparativeAmount": null,
+        "style": "Normal",
+        "indentLevel": 0
+      },
+      {
+        "description": "Adjustments to reconcile net income:",
+        "amount": { "value": "0.00", "currency": "USD" },
+        "comparativeAmount": null,
+        "style": "Header",
+        "indentLevel": 0
+      },
+      {
+        "description": "Depreciation",
+        "amount": { "value": "20000.00", "currency": "USD" },
+        "comparativeAmount": null,
+        "style": "Normal",
+        "indentLevel": 1
+      }
+    ],
+    "netCashFlow": { "value": "170000.00", "currency": "USD" },
+    "comparativeNetCashFlow": null
+  },
+  "investingActivities": {
+    "title": "Cash Flows from Investing Activities",
+    "lineItems": [],
+    "netCashFlow": { "value": "-50000.00", "currency": "USD" },
+    "comparativeNetCashFlow": null
+  },
+  "financingActivities": {
+    "title": "Cash Flows from Financing Activities",
+    "lineItems": [],
+    "netCashFlow": { "value": "-90000.00", "currency": "USD" },
+    "comparativeNetCashFlow": null
+  },
+  "exchangeRateEffect": { "value": "0.00", "currency": "USD" },
+  "netChangeInCash": { "value": "30000.00", "currency": "USD" },
+  "endingCash": { "value": "150000.00", "currency": "USD" }
+}
+```
+</ResponseExample>
+
+## Statement of Changes in Equity
+
+Generate a statement of changes in equity showing movements in equity accounts.
+
+```bash GET /api/v1/reports/equity-statement
+curl -X GET "https://your-instance.accountability.app/api/v1/reports/equity-statement?organizationId={orgId}&companyId={companyId}&periodStartDate=2025-01-01&periodEndDate=2025-03-31" \
+  -H "Authorization: Bearer your-session-token"
+```
+
+<ParamField query="organizationId" type="string" required>
+  Organization UUID
+</ParamField>
+
+<ParamField query="companyId" type="string" required>
+  Company UUID
+</ParamField>
+
+<ParamField query="periodStartDate" type="string" required>
+  Period start date (ISO 8601: YYYY-MM-DD)
+</ParamField>
+
+<ParamField query="periodEndDate" type="string" required>
+  Period end date (ISO 8601: YYYY-MM-DD)
+</ParamField>
+
+<ParamField query="format" type="enum" default="json">
+  Output format: `json`, `pdf`, `excel`, `csv`
+</ParamField>
+
+<ResponseExample>
+```json
+{
+  "companyId": "comp_123e4567-e89b-12d3-a456-426614174000",
+  "periodStartDate": "2025-01-01",
+  "periodEndDate": "2025-03-31",
+  "currency": "USD",
+  "generatedAt": "2025-04-01T10:00:00Z",
+  "openingBalances": {
+    "movementType": "NetIncome",
+    "description": "Balance at January 1, 2025",
+    "commonStock": { "value": "100000.00", "currency": "USD" },
+    "preferredStock": { "value": "0.00", "currency": "USD" },
+    "additionalPaidInCapital": { "value": "50000.00", "currency": "USD" },
+    "retainedEarnings": { "value": "300000.00", "currency": "USD" },
+    "treasuryStock": { "value": "0.00", "currency": "USD" },
+    "accumulatedOCI": { "value": "20000.00", "currency": "USD" },
+    "nonControllingInterest": { "value": "0.00", "currency": "USD" },
+    "total": { "value": "470000.00", "currency": "USD" }
+  },
+  "movements": [
+    {
+      "movementType": "NetIncome",
+      "description": "Net Income for the period",
+      "commonStock": { "value": "0.00", "currency": "USD" },
+      "preferredStock": { "value": "0.00", "currency": "USD" },
+      "additionalPaidInCapital": { "value": "0.00", "currency": "USD" },
+      "retainedEarnings": { "value": "150000.00", "currency": "USD" },
+      "treasuryStock": { "value": "0.00", "currency": "USD" },
+      "accumulatedOCI": { "value": "0.00", "currency": "USD" },
+      "nonControllingInterest": { "value": "0.00", "currency": "USD" },
+      "total": { "value": "150000.00", "currency": "USD" }
+    },
+    {
+      "movementType": "DividendsDeclared",
+      "description": "Dividends declared",
+      "commonStock": { "value": "0.00", "currency": "USD" },
+      "preferredStock": { "value": "0.00", "currency": "USD" },
+      "additionalPaidInCapital": { "value": "0.00", "currency": "USD" },
+      "retainedEarnings": { "value": "-120000.00", "currency": "USD" },
+      "treasuryStock": { "value": "0.00", "currency": "USD" },
+      "accumulatedOCI": { "value": "0.00", "currency": "USD" },
+      "nonControllingInterest": { "value": "0.00", "currency": "USD" },
+      "total": { "value": "-120000.00", "currency": "USD" }
+    }
+  ],
+  "closingBalances": {
+    "movementType": "NetIncome",
+    "description": "Balance at March 31, 2025",
+    "commonStock": { "value": "100000.00", "currency": "USD" },
+    "preferredStock": { "value": "0.00", "currency": "USD" },
+    "additionalPaidInCapital": { "value": "50000.00", "currency": "USD" },
+    "retainedEarnings": { "value": "330000.00", "currency": "USD" },
+    "treasuryStock": { "value": "0.00", "currency": "USD" },
+    "accumulatedOCI": { "value": "20000.00", "currency": "USD" },
+    "nonControllingInterest": { "value": "0.00", "currency": "USD" },
+    "total": { "value": "500000.00", "currency": "USD" }
+  }
+}
+```
+</ResponseExample>
+
+## Error Responses
+
+<AccordionGroup>
+  <Accordion title="Company Not Found (404)">
+    ```json
+    {
+      "_tag": "CompanyNotFoundError",
+      "companyId": "comp_123e4567-e89b-12d3-a456-426614174000",
+      "message": "Company not found"
+    }
+    ```
+  </Accordion>
+  
+  <Accordion title="Trial Balance Not Balanced (500)">
+    ```json
+    {
+      "_tag": "TrialBalanceNotBalancedError",
+      "companyId": "comp_123e4567-e89b-12d3-a456-426614174000",
+      "totalDebits": "1500000.00",
+      "totalCredits": "1500100.00",
+      "difference": "100.00",
+      "message": "Trial balance is not balanced: debits and credits differ by 100.00"
+    }
+    ```
+  </Accordion>
+  
+  <Accordion title="Balance Sheet Not Balanced (500)">
+    ```json
+    {
+      "_tag": "BalanceSheetNotBalancedError",
+      "companyId": "comp_123e4567-e89b-12d3-a456-426614174000",
+      "totalAssets": "800000.00",
+      "totalLiabilitiesAndEquity": "799000.00",
+      "difference": "1000.00",
+      "message": "Balance sheet is not balanced: Assets ≠ Liabilities + Equity"
+    }
+    ```
+  </Accordion>
+  
+  <Accordion title="Invalid Report Period (400)">
+    ```json
+    {
+      "_tag": "InvalidReportPeriodError",
+      "periodStartDate": "2025-03-31",
+      "periodEndDate": "2025-01-01",
+      "message": "Period end date must be after period start date"
+    }
+    ```
+  </Accordion>
+</AccordionGroup>

@@ -1,0 +1,208 @@
+---
+title: Currencies API
+description: Currency master data for UI dropdowns and currency selection
+---
+
+# Currencies API
+
+The Currencies API provides access to predefined currency master data with ISO 4217 codes, symbols, and decimal precision for use in UI dropdowns and currency selection.
+
+## Base Path
+
+```
+/api/v1/currencies
+```
+
+All endpoints require authentication with a valid session token.
+
+## List Currencies
+
+Retrieve a list of available currencies for UI dropdowns.
+
+```bash GET /api/v1/currencies
+curl -X GET "https://your-instance.accountability.app/api/v1/currencies?isActive=true" \
+  -H "Authorization: Bearer your-session-token"
+```
+
+<ParamField query="isActive" type="boolean" default="true">
+  Filter by active status (only active currencies by default)
+</ParamField>
+
+<ResponseExample>
+```json
+{
+  "currencies": [
+    {
+      "code": "USD",
+      "name": "United States Dollar",
+      "symbol": "$",
+      "decimalPlaces": 2,
+      "isActive": true
+    },
+    {
+      "code": "EUR",
+      "name": "Euro",
+      "symbol": "€",
+      "decimalPlaces": 2,
+      "isActive": true
+    },
+    {
+      "code": "GBP",
+      "name": "British Pound Sterling",
+      "symbol": "£",
+      "decimalPlaces": 2,
+      "isActive": true
+    },
+    {
+      "code": "JPY",
+      "name": "Japanese Yen",
+      "symbol": "¥",
+      "decimalPlaces": 0,
+      "isActive": true
+    },
+    {
+      "code": "CHF",
+      "name": "Swiss Franc",
+      "symbol": "Fr",
+      "decimalPlaces": 2,
+      "isActive": true
+    },
+    {
+      "code": "CAD",
+      "name": "Canadian Dollar",
+      "symbol": "C$",
+      "decimalPlaces": 2,
+      "isActive": true
+    },
+    {
+      "code": "AUD",
+      "name": "Australian Dollar",
+      "symbol": "A$",
+      "decimalPlaces": 2,
+      "isActive": true
+    },
+    {
+      "code": "CNY",
+      "name": "Chinese Yuan",
+      "symbol": "¥",
+      "decimalPlaces": 2,
+      "isActive": true
+    }
+  ]
+}
+```
+</ResponseExample>
+
+## Response Fields
+
+<ResponseField name="currencies" type="array">
+  Array of currency objects
+  
+  <Expandable title="Currency properties">
+    <ResponseField name="code" type="string">
+      ISO 4217 currency code (3 characters, e.g., "USD", "EUR")
+    </ResponseField>
+    
+    <ResponseField name="name" type="string">
+      Full currency name (e.g., "United States Dollar")
+    </ResponseField>
+    
+    <ResponseField name="symbol" type="string">
+      Currency symbol for display (e.g., "$", "€", "£")
+    </ResponseField>
+    
+    <ResponseField name="decimalPlaces" type="integer">
+      Number of decimal places for this currency:
+      - Most currencies: 2 decimal places
+      - Japanese Yen (JPY): 0 decimal places
+      - Some cryptocurrencies: 8 decimal places
+    </ResponseField>
+    
+    <ResponseField name="isActive" type="boolean">
+      Whether this currency is active and available for selection
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+## Common Currencies
+
+The API returns predefined currencies including:
+
+<CardGroup cols={2}>
+  <Card title="Major Currencies" icon="dollar-sign">
+    - USD - United States Dollar
+    - EUR - Euro
+    - GBP - British Pound Sterling
+    - JPY - Japanese Yen
+  </Card>
+  
+  <Card title="Regional Currencies" icon="globe">
+    - CHF - Swiss Franc
+    - CAD - Canadian Dollar
+    - AUD - Australian Dollar
+    - CNY - Chinese Yuan
+  </Card>
+  
+  <Card title="Latin America" icon="map">
+    - MXN - Mexican Peso
+    - BRL - Brazilian Real
+    - ARS - Argentine Peso
+    - CLP - Chilean Peso
+  </Card>
+  
+  <Card title="Asia-Pacific" icon="earth-asia">
+    - INR - Indian Rupee
+    - SGD - Singapore Dollar
+    - HKD - Hong Kong Dollar
+    - KRW - South Korean Won
+  </Card>
+</CardGroup>
+
+## Usage in UI
+
+This endpoint is designed for populating currency dropdowns in the user interface:
+
+```jsx
+// Example usage in a React component
+const { data: currencies } = useQuery({
+  queryKey: ['currencies'],
+  queryFn: () => api.GET('/api/v1/currencies')
+})
+
+return (
+  <select name="currency">
+    {currencies?.currencies.map((currency) => (
+      <option key={currency.code} value={currency.code}>
+        {currency.code} - {currency.name} ({currency.symbol})
+      </option>
+    ))}
+  </select>
+)
+```
+
+## Decimal Precision
+
+Use the `decimalPlaces` field to format amounts correctly:
+
+```javascript
+function formatAmount(amount, currencyCode, currencies) {
+  const currency = currencies.find(c => c.code === currencyCode)
+  const decimals = currency?.decimalPlaces ?? 2
+  
+  return new Intl.NumberFormat('en-US', {
+    style: 'currency',
+    currency: currencyCode,
+    minimumFractionDigits: decimals,
+    maximumFractionDigits: decimals
+  }).format(amount)
+}
+
+// Examples:
+formatAmount(1234.56, 'USD', currencies)  // "$1,234.56"
+formatAmount(1234.56, 'JPY', currencies)  // "¥1,235" (no decimals)
+formatAmount(1234.567, 'EUR', currencies) // "€1,234.57" (2 decimals)
+```
+
+<Note>
+The currency list is predefined and managed at the application level. Custom currencies cannot be added via the API.
+</Note>

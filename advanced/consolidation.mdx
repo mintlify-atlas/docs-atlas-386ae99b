@@ -1,0 +1,276 @@
+---
+title: 'Consolidation'
+description: 'Create and manage consolidation groups for multi-company financial reporting'
+---
+
+# Consolidation
+
+Consolidation groups allow you to combine financial statements from multiple related companies into unified consolidated reports. This is essential for parent companies that need to report on their entire corporate structure, including subsidiaries and other investments.
+
+## Overview
+
+Per ASC 810 (Consolidation), a consolidation group defines the parent-subsidiary relationships for consolidated financial reporting. It includes:
+
+- **Parent company** - The top-level consolidating entity
+- **Member companies** - Subsidiaries and investees with their ownership percentages
+- **Consolidation methods** - How each member is consolidated based on ownership
+- **Elimination rules** - Rules for removing intercompany transactions
+
+## Consolidation Methods
+
+The system supports multiple consolidation methods based on ownership percentage and control:
+
+| Method | Ownership | Treatment |
+|--------|-----------|----------|
+| **Full Consolidation** | &gt;50% voting interest | Combine 100% of assets/liabilities, recognize non-controlling interest |
+| **Equity Method** | 20-50% significant influence | Single line investment, share of earnings |
+| **Cost Method** | &lt;20% passive investment | Investment at cost, dividends as income |
+| **VIE Consolidation** | Primary beneficiary | Full consolidation regardless of voting interest |
+
+<Info>
+**Variable Interest Entity (VIE)** consolidation applies when you are the primary beneficiary of an entity, even without majority voting control. This requires a VIE determination assessment.
+</Info>
+
+## Creating a Consolidation Group
+
+<Steps>
+
+### Define the group structure
+
+Navigate to **Consolidation** > **Groups** and click **Create Group**. Provide:
+
+- **Group name** - Descriptive name for the consolidation group
+- **Parent company** - The top-level company producing consolidated statements
+- **Reporting currency** - Currency for consolidated financial statements (e.g., USD)
+
+### Add member companies
+
+For each subsidiary or investment, add a member with:
+
+- **Company** - Select the member company from your organization
+- **Ownership percentage** - Your ownership stake (0-100%)
+- **Consolidation method** - Automatically determined based on ownership, or manually set
+- **Acquisition date** - When the investment was acquired
+- **Goodwill** - Goodwill amount recognized at acquisition (optional)
+
+<Note>
+The system automatically calculates the **non-controlling interest percentage** as (100 - ownership %) for fully consolidated members.
+</Note>
+
+### Configure elimination rules
+
+Add elimination rules to remove intercompany transactions during consolidation. See [Elimination Rules](/advanced/elimination-rules) for detailed configuration.
+
+### Activate the group
+
+Once configured, activate the consolidation group to enable consolidation runs.
+
+</Steps>
+
+## Member Properties
+
+Each member in a consolidation group has the following properties:
+
+### Ownership Structure
+
+```typescript
+interface ConsolidationMember {
+  companyId: string
+  ownershipPercentage: number // 0-100
+  consolidationMethod: "FullConsolidation" | "EquityMethod" | "CostMethod" | "VariableInterestEntity"
+  acquisitionDate: string // ISO date
+  goodwillAmount?: MonetaryAmount
+  nonControllingInterestPercentage: number // 100 - ownership
+}
+```
+
+### VIE Determination
+
+For Variable Interest Entity members, the system tracks:
+
+- **Is primary beneficiary** - Whether you are the primary beneficiary
+- **Has controlling financial interest** - Whether you have controlling financial interest
+
+These determinations drive whether VIE consolidation is required.
+
+## Running a Consolidation
+
+Once your consolidation group is configured, you can run the consolidation process for any closed fiscal period. The consolidation run executes the following steps:
+
+<Steps>
+
+### Validate member data
+
+Ensures all member companies have:
+- Closed fiscal periods for the consolidation date
+- Balanced trial balances
+- Complete intercompany transaction records
+
+### Translate currencies
+
+Translates each member's trial balance from their functional currency to the reporting currency using:
+- **Closing rate** for assets and liabilities
+- **Average rate** for income and expenses
+- **Historical rate** for equity capital accounts
+
+See [Currency Translation](/advanced/currency-translation) for details.
+
+### Aggregate balances
+
+Sums account balances across all fully consolidated members.
+
+### Match intercompany transactions
+
+Identifies and reconciles intercompany transactions between group members. See [Intercompany Transactions](/advanced/intercompany-transactions).
+
+### Apply eliminations
+
+Generates elimination journal entries based on your elimination rules to remove:
+- Intercompany receivables and payables
+- Intercompany revenue and expenses
+- Intercompany dividends and investments
+- Unrealized profits on inventory and fixed assets
+
+### Calculate non-controlling interest
+
+Computes the minority shareholders' portion of subsidiaries that are not 100% owned.
+
+### Generate consolidated trial balance
+
+Produces the final consolidated trial balance used for consolidated financial statement generation.
+
+</Steps>
+
+## Consolidation Run Options
+
+When initiating a consolidation run, you can configure:
+
+- **Skip validation** - Bypass validation step (use with caution)
+- **Continue on warnings** - Proceed despite validation warnings
+- **Include equity method investments** - Include equity method investees in consolidation
+- **Force regeneration** - Regenerate even if a prior run exists for the period
+
+<Warning>
+Skipping validation can result in inaccurate consolidated reports if member data is incomplete or unbalanced. Only use this option if you've manually verified all member trial balances.
+</Warning>
+
+## Viewing Consolidation Results
+
+After a successful consolidation run, you can:
+
+1. **Review the consolidated trial balance** - See all accounts with aggregated, eliminated, and final consolidated balances
+2. **View elimination entries** - Inspect all generated elimination journal entries
+3. **Check non-controlling interest** - Review NCI calculations for partially-owned subsidiaries
+4. **Generate consolidated reports** - Create Balance Sheet, Income Statement, and Cash Flow Statement
+
+## Consolidated Trial Balance Structure
+
+The consolidated trial balance shows:
+
+```typescript
+interface ConsolidatedTrialBalanceLineItem {
+  accountNumber: string
+  accountName: string
+  accountType: "Asset" | "Liability" | "Equity" | "Revenue" | "Expense"
+  accountCategory: string // Detailed subcategory
+  
+  // Balances at each stage
+  aggregatedBalance: MonetaryAmount     // Sum of all members
+  eliminationAmount: MonetaryAmount     // Total eliminations applied
+  nciAmount?: MonetaryAmount            // Non-controlling interest portion
+  consolidatedBalance: MonetaryAmount   // Final consolidated balance
+}
+```
+
+This provides full transparency into how the consolidated balance was calculated for each account.
+
+## Managing Consolidation Groups
+
+### Editing a Group
+
+You can modify consolidation group properties, add or remove members, and update elimination rules at any time. Changes only affect future consolidation runs.
+
+### Deactivating a Group
+
+Deactivate a consolidation group to prevent new consolidation runs while preserving historical consolidation data.
+
+<Note>
+Deactivating a group does **not** delete prior consolidation runs. Historical consolidated reports remain available.
+</Note>
+
+## Best Practices
+
+<AccordionGroup>
+
+<Accordion title="Close all member periods before consolidation">
+Ensure all member companies have completed their month-end or period-end close before running consolidation. This guarantees complete and accurate data.
+</Accordion>
+
+<Accordion title="Reconcile intercompany transactions regularly">
+Reconcile intercompany transactions throughout the period, not just at consolidation time. This identifies discrepancies early when they're easier to resolve.
+</Accordion>
+
+<Accordion title="Document VIE determinations">
+For Variable Interest Entity relationships, maintain clear documentation of the VIE determination factors and review them annually.
+</Accordion>
+
+<Accordion title="Review elimination rules quarterly">
+Quarterly review your elimination rules to ensure they capture all intercompany transaction types and use the correct accounts.
+</Accordion>
+
+<Accordion title="Use consistent fiscal periods">
+Align fiscal period structures across all member companies when possible. This simplifies consolidation and ensures comparability.
+</Accordion>
+
+</AccordionGroup>
+
+## Common Scenarios
+
+### Wholly-Owned Subsidiaries
+
+For 100% owned subsidiaries:
+- Set ownership to 100%
+- Use Full Consolidation method
+- Non-controlling interest will be 0%
+- All intercompany transactions must eliminate completely
+
+### Majority-Owned Subsidiaries (51-99%)
+
+For partially-owned subsidiaries:
+- Set ownership to actual percentage (e.g., 75%)
+- Use Full Consolidation method
+- System calculates non-controlling interest (e.g., 25%)
+- NCI share appears in equity on consolidated Balance Sheet
+
+### Equity Method Investments (20-50%)
+
+For significant influence investments:
+- Set ownership to actual percentage (e.g., 30%)
+- Use Equity Method
+- Investment appears as single line on Balance Sheet
+- Share of investee's earnings recorded as investment income
+
+### Variable Interest Entities
+
+For VIE relationships:
+- Set consolidation method to Variable Interest Entity
+- Complete VIE determination (primary beneficiary and controlling interest flags)
+- Consolidate fully regardless of voting percentage
+- May require additional disclosures in footnotes
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Elimination Rules" icon="rectangle-xmark" href="/advanced/elimination-rules">
+    Configure rules for eliminating intercompany transactions
+  </Card>
+  <Card title="Intercompany Transactions" icon="arrow-right-arrow-left" href="/advanced/intercompany-transactions">
+    Track and reconcile transactions between group companies
+  </Card>
+  <Card title="Currency Translation" icon="money-bill-transfer" href="/advanced/currency-translation">
+    Understand currency translation methods for consolidation
+  </Card>
+  <Card title="Consolidated Reports" icon="chart-line" href="/reporting/consolidated-reports">
+    Generate consolidated financial statements
+  </Card>
+</CardGroup>

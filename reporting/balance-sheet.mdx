@@ -1,0 +1,282 @@
+---
+title: 'Balance Sheet'
+description: 'Generate balance sheet reports showing financial position at a point in time'
+icon: 'building-columns'
+---
+
+## Overview
+
+The balance sheet presents a company's financial position at a specific point in time, showing assets, liabilities, and equity. It implements the fundamental accounting equation: **Assets = Liabilities + Equity**.
+
+<Info>
+Balance sheets are generated using `BalanceSheetService` in `packages/core/src/reporting/BalanceSheetService.ts`, following ASC 210 standards.
+</Info>
+
+## Report Structure
+
+### Sections
+
+The balance sheet is organized into five main sections per ASC 210:
+
+<Tabs>
+  <Tab title="Assets">
+    **Current Assets**
+    - Cash and cash equivalents
+    - Accounts receivable
+    - Inventory
+    - Prepaid expenses
+    - Other current assets
+    
+    **Non-Current Assets**
+    - Property, plant, and equipment
+    - Intangible assets
+    - Long-term investments
+    - Other non-current assets
+  </Tab>
+  
+  <Tab title="Liabilities">
+    **Current Liabilities**
+    - Accounts payable
+    - Accrued expenses
+    - Short-term debt
+    - Current portion of long-term debt
+    
+    **Non-Current Liabilities**
+    - Long-term debt
+    - Deferred tax liabilities
+    - Other long-term liabilities
+  </Tab>
+  
+  <Tab title="Equity">
+    **Equity Components**
+    - Common stock
+    - Additional paid-in capital
+    - Retained earnings
+    - Accumulated other comprehensive income
+    - Treasury stock (contra-equity)
+  </Tab>
+</Tabs>
+
+### Line Items
+
+Each line item includes:
+
+```typescript
+interface BalanceSheetLineItem {
+  accountId?: AccountId              // null for subtotals/totals
+  accountNumber?: string             // for display and sorting
+  description: string                // account name or label
+  currentAmount: MonetaryAmount      // current period balance
+  comparativeAmount?: MonetaryAmount // prior period (if requested)
+  variance?: MonetaryAmount          // absolute variance
+  variancePercentage?: number        // variance as percentage
+  isSubtotal: boolean
+  indentLevel: number                // for hierarchical display
+  style: "Normal" | "Subtotal" | "Total" | "Header"
+}
+```
+
+### Key Totals
+
+- **Total Assets**: Current Assets + Non-Current Assets
+- **Total Liabilities**: Current Liabilities + Non-Current Liabilities
+- **Total Equity**: Sum of all equity accounts
+- **Total Liabilities and Equity**: Must equal Total Assets
+
+## Generating a Balance Sheet
+
+<Steps>
+<Step title="Select company and date">
+Choose the company and the as-of date for the balance sheet. This represents the financial position at the end of that specific day.
+</Step>
+
+<Step title="Configure comparative period (optional)">
+Optionally select a comparative date (e.g., prior year-end) to show period-over-period changes with variance analysis.
+</Step>
+
+<Step title="Set display options">
+- **Include zero balances**: Show or hide accounts with zero balances
+- **Show account numbers**: Display account codes for reference
+- **Indentation level**: Control hierarchical display depth
+</Step>
+
+<Step title="Generate and validate">
+The service generates the report and automatically validates that Assets = Liabilities + Equity. Any imbalance raises a `BalanceSheetNotBalancedError`.
+</Step>
+</Steps>
+
+## Service Methods
+
+### generateBalanceSheet
+
+Generates a complete balance sheet report.
+
+```typescript
+interface GenerateBalanceSheetInput {
+  companyId: CompanyId
+  asOfDate: LocalDate
+  includeZeroBalances?: boolean      // default: false
+  comparativeDate?: LocalDate        // optional prior period
+}
+
+function generateBalanceSheet(
+  input: GenerateBalanceSheetInput
+): Effect<BalanceSheetReport, CompanyNotFoundError | BalanceSheetNotBalancedError>
+```
+
+**Returns**: `BalanceSheetReport` with all sections, line items, and totals
+
+**Errors**:
+- `CompanyNotFoundError`: Company does not exist
+- `BalanceSheetNotBalancedError`: Assets ≠ Liabilities + Equity
+
+## Report Validation
+
+The balance sheet implements strict validation per ASC 210:
+
+### Balancing Equation
+
+```typescript
+totalAssets === totalLiabilities + totalEquity
+```
+
+If this fundamental equation doesn't hold, the report generation fails with detailed error information showing:
+- Total Assets amount
+- Total Liabilities amount
+- Total Equity amount
+- The discrepancy
+
+<Note>
+A balance sheet that doesn't balance indicates serious accounting data issues and must be investigated immediately.
+</Note>
+
+## Comparative Analysis
+
+When a comparative date is provided, the report includes:
+
+### Variance Columns
+
+- **Absolute Variance**: Current amount - Comparative amount
+- **Percentage Variance**: (Variance / Comparative amount) × 100
+
+### Variance Analysis Features
+
+```typescript
+// Check if variance is positive (increase)
+lineItem.hasPositiveVariance
+
+// Check if variance is negative (decrease)
+lineItem.hasNegativeVariance
+```
+
+## Account Classification
+
+Accounts are classified into sections based on `AccountCategory`:
+
+### Current vs Non-Current Assets
+
+- **Current Assets**: `CurrentAsset` category
+- **Non-Current Assets**: `NonCurrentAsset`, `FixedAsset`, `IntangibleAsset` categories
+
+### Current vs Non-Current Liabilities
+
+- **Current Liabilities**: `CurrentLiability` category
+- **Non-Current Liabilities**: `NonCurrentLiability` category
+
+### Equity
+
+- **Contributed Capital**: `ContributedCapital` category
+- **Retained Earnings**: `RetainedEarnings` category
+- **Other Comprehensive Income**: `OtherComprehensiveIncome` category
+- **Treasury Stock**: `TreasuryStock` category (contra-equity)
+
+## UI Workflow
+
+<Tabs>
+  <Tab title="Single Period">
+    1. Navigate to **Reports** → **Balance Sheet**
+    2. Select the company
+    3. Choose the **As-of Date** (e.g., December 31, 2024)
+    4. Click **Generate Report**
+    5. Review the financial position:
+       - Current and non-current assets
+       - Current and non-current liabilities
+       - Equity components
+    6. Verify **Total Assets** equals **Total Liabilities and Equity**
+    7. Export to PDF or Excel
+  </Tab>
+  
+  <Tab title="Comparative Period">
+    1. Navigate to **Reports** → **Balance Sheet**
+    2. Select the company
+    3. Choose **As-of Date** (e.g., December 31, 2024)
+    4. Choose **Comparative Date** (e.g., December 31, 2023)
+    5. Click **Generate Report**
+    6. Review year-over-year changes:
+       - Variance amounts in separate column
+       - Percentage changes
+       - Trend indicators (↑ increase, ↓ decrease)
+    7. Analyze significant variances
+    8. Export comparative report
+  </Tab>
+</Tabs>
+
+## Report Features
+
+### Section Helpers
+
+The `BalanceSheetReport` class provides convenient methods:
+
+```typescript
+// Get all sections as array
+report.sections
+
+// Get asset sections only
+report.assetSections  // [currentAssets, nonCurrentAssets]
+
+// Get liability sections only
+report.liabilitySections  // [currentLiabilities, nonCurrentLiabilities]
+
+// Total account count
+report.totalAccountCount
+```
+
+### Balance Checking
+
+```typescript
+// Check if balanced
+report.isBalanced
+
+// Get out-of-balance amount
+report.outOfBalanceAmount  // Should be zero
+```
+
+## Export Formats
+
+Balance sheets support multiple export formats:
+
+- **PDF**: Professional formatted report with company header
+- **Excel**: Multi-sheet workbook with formulas and formatting
+- **CSV**: Raw data for custom analysis
+- **JSON**: Structured data for API integration
+
+## Best Practices
+
+1. **Monthly Close**: Generate balance sheets at month-end to track financial position trends
+2. **Comparative Reporting**: Always include prior period comparison for meaningful analysis
+3. **Account Organization**: Maintain proper account categorization for accurate section classification
+4. **Regular Validation**: Verify the balance sheet equation holds before closing periods
+5. **Zero Balance Exclusion**: Exclude zero-balance accounts for cleaner presentation
+
+## Common Issues
+
+| Issue | Cause | Resolution |
+|-------|-------|------------|
+| Balance sheet doesn't balance | Incomplete journal entries | Review trial balance first, verify all entries have balanced debits/credits |
+| Accounts in wrong section | Incorrect account category | Update account's category in chart of accounts |
+| Missing accounts | Zero balance + excluded | Enable "Include zero balances" option |
+| Comparative period error | Invalid comparative date | Ensure comparative date is before as-of date |
+
+<Info>
+The balance sheet is typically generated after the trial balance to ensure all accounts are balanced before sectional classification.
+</Info>

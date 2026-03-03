@@ -1,0 +1,756 @@
+---
+title: SSR and Routing
+description: Server-side rendering and file-based routing with TanStack Start
+---
+
+## Overview
+
+Accountability uses **TanStack Start** for full-stack React with server-side rendering (SSR). Routes are defined using a **file-based routing** system that automatically generates type-safe route definitions.
+
+## File-Based Routing
+
+### Route File Structure
+
+```
+packages/web/src/routes/
+├── __root.tsx                         # Root layout (wraps all routes)
+├── index.tsx                          # Home page (/)
+├── login.tsx                          # Login page (/login)
+├── register.tsx                       # Register page (/register)
+└── organizations/                    # Organizations routes
+    ├── index.tsx                      # List (/organizations)
+    ├── new.tsx                        # Create (/organizations/new)
+    └── $organizationId/               # Dynamic segment
+        ├── route.tsx                  # Layout for org routes
+        ├── index.tsx                  # Org home (/organizations/:orgId)
+        ├── dashboard.tsx              # Dashboard (/organizations/:orgId/dashboard)
+        └── companies/
+            ├── index.tsx              # List (/organizations/:orgId/companies)
+            ├── new.tsx                # Create (/organizations/:orgId/companies/new)
+            └── $companyId/
+                ├── index.tsx          # Company detail
+                ├── edit.tsx           # Edit company
+                └── accounts/
+                    ├── index.tsx      # Chart of accounts
+                    └── new.tsx        # Create account
+```
+
+### Route Definitions
+
+#### Basic Route
+
+```tsx
+// routes/login.tsx
+import { createFileRoute } from "@tanstack/react-start"
+
+export const Route = createFileRoute("/login")({
+  component: LoginPage
+})
+
+function LoginPage() {
+  return (
+    <div>
+      <h1>Login</h1>
+      <LoginForm />
+    </div>
+  )
+}
+```
+
+#### Route with Loader (SSR)
+
+```tsx
+// routes/organizations/index.tsx
+import { createFileRoute } from "@tanstack/react-start"
+import { api } from "@/api/client"
+
+export const Route = createFileRoute("/organizations/")({
+  loader: async ({ request }) => {
+    // Forward cookie for authentication
+    const cookie = request.headers.get("cookie")
+    
+    const { data, error } = await api.GET("/api/v1/organizations", {
+      headers: cookie ? { cookie } : undefined
+    })
+    
+    if (error) {
+      throw new Error("Failed to load organizations")
+    }
+    
+    return { organizations: data ?? [] }
+  },
+  component: OrganizationsPage
+})
+
+function OrganizationsPage() {
+  // Data is immediately available from SSR
+  const { organizations } = Route.useLoaderData()
+  
+  return (
+    <div>
+      <h1>Organizations</h1>
+      <OrganizationList organizations={organizations} />
+    </div>
+  )
+}
+```
+
+#### Route with Params
+
+```tsx
+// routes/organizations/$organizationId/companies/$companyId/index.tsx
+import { createFileRoute } from "@tanstack/react-start"
+import { api } from "@/api/client"
+
+export const Route = createFileRoute(
+  "/organizations/$organizationId/companies/$companyId/"
+)({
+  loader: async ({ request, params }) => {
+    const cookie = request.headers.get("cookie")
+    
+    // Type-safe params
+    const { organizationId, companyId } = params
+    
+    const { data, error } = await api.GET("/api/v1/companies/{id}", {
+      params: { path: { id: companyId } },
+      headers: cookie ? { cookie } : undefined
+    })
+    
+    if (error) {
+      throw new Error("Company not found")
+    }
+    
+    return { company: data }
+  },
+  component: CompanyDetailPage
+})
+
+function CompanyDetailPage() {
+  const { company } = Route.useLoaderData()
+  const { organizationId, companyId } = useParams()
+  
+  return (
+    <div>
+      <h1>{company.name}</h1>
+      <CompanyDetails company={company} />
+    </div>
+  )
+}
+```
+
+#### Route with Search Params
+
+```tsx
+// routes/organizations/$organizationId/companies/$companyId/journal-entries/index.tsx
+import { createFileRoute } from "@tanstack/react-start"
+import { z } from "zod"
+import { api } from "@/api/client"
+
+const searchSchema = z.object({
+  page: z.number().optional().default(1),
+  status: z.enum(["Draft", "PendingApproval", "Approved", "Posted", "Void"]).optional(),
+  search: z.string().optional()
+})
+
+export const Route = createFileRoute(
+  "/organizations/$organizationId/companies/$companyId/journal-entries/"
+)({
+  validateSearch: searchSchema,
+  
+  loader: async ({ request, params, deps: { page, status, search } }) => {
+    const cookie = request.headers.get("cookie")
+    const { companyId } = params
+    
+    const { data, error } = await api.GET("/api/v1/journal-entries", {
+      params: {
+        query: {
+          companyId,
+          page,
+          limit: 20,
+          status,
+          search
+        }
+      },
+      headers: cookie ? { cookie } : undefined
+    })
+    
+    if (error) {
+      throw new Error("Failed to load journal entries")
+    }
+    
+    return {
+      entries: data?.items ?? [],
+      total: data?.total ?? 0,
+      page,
+      status,
+      search
+    }
+  },
+  component: JournalEntriesPage
+})
+
+function JournalEntriesPage() {
+  const { entries, total, page, status, search } = Route.useLoaderData()
+  const navigate = useNavigate()
+  
+  const handleFilterChange = (newStatus: string | undefined) => {
+    navigate({
+      search: { page: 1, status: newStatus, search }
+    })
+  }
+  
+  return (
+    <div>
+      <h1>Journal Entries</h1>
+      <FilterBar status={status} onStatusChange={handleFilterChange} />
+      <EntryList entries={entries} />
+      <Pagination currentPage={page} totalPages={Math.ceil(total / 20)} />
+    </div>
+  )
+}
+```
+
+## SSR Data Fetching
+
+### Loaders
+
+**Loaders run on the server during SSR** and provide data to the page component.
+
+```tsx
+export const Route = createFileRoute("/companies/")({
+  loader: async ({ request, params, context }) => {
+    // Available in loader:
+    // - request: Request object with headers, cookies
+    // - params: URL parameters
+    // - context: Route context (user, etc.)
+    
+    const cookie = request.headers.get("cookie")
+    
+    // Parallel data fetching
+    const [companiesResult, statsResult] = await Promise.all([
+      api.GET("/api/v1/companies", {
+        headers: cookie ? { cookie } : undefined
+      }),
+      api.GET("/api/v1/dashboard/stats", {
+        headers: cookie ? { cookie } : undefined
+      })
+    ])
+    
+    return {
+      companies: companiesResult.data ?? [],
+      stats: statsResult.data ?? null
+    }
+  },
+  component: CompaniesPage
+})
+```
+
+### Cookie Forwarding for Authentication
+
+<Warning>
+  **Always forward the cookie header** when calling authenticated endpoints in loaders. Otherwise, the API won't know who the user is.
+</Warning>
+
+```tsx
+loader: async ({ request }) => {
+  // CORRECT: Forward cookie
+  const cookie = request.headers.get("cookie")
+  const { data } = await api.GET("/api/v1/protected", {
+    headers: cookie ? { cookie } : undefined
+  })
+  
+  // WRONG: No cookie forwarding (API sees anonymous request)
+  const { data } = await api.GET("/api/v1/protected")
+}
+```
+
+### Handling Loader Errors
+
+```tsx
+loader: async ({ request, params }) => {
+  const cookie = request.headers.get("cookie")
+  
+  const { data, error } = await api.GET("/api/v1/companies/{id}", {
+    params: { path: { id: params.companyId } },
+    headers: cookie ? { cookie } : undefined
+  })
+  
+  if (error) {
+    if (error.status === 404) {
+      throw new Error("Company not found")
+    }
+    if (error.status === 401) {
+      throw redirect({ to: "/login" })
+    }
+    throw new Error("Failed to load company")
+  }
+  
+  return { company: data }
+}
+```
+
+## Layouts and Nested Routes
+
+### Root Layout
+
+```tsx
+// routes/__root.tsx
+import { createRootRouteWithContext } from "@tanstack/react-start"
+import { Outlet } from "@tanstack/react-router"
+import appCss from "../index.css?url"
+
+interface RouterContext {
+  user: User | null
+}
+
+export const Route = createRootRouteWithContext<RouterContext>()({
+  beforeLoad: async ({ request }) => {
+    // Load user for all routes
+    const cookie = request?.headers?.get("cookie")
+    
+    if (!cookie) {
+      return { user: null }
+    }
+    
+    const { data, error } = await api.GET("/api/auth/me", {
+      headers: { cookie }
+    })
+    
+    return { user: error ? null : data?.user ?? null }
+  },
+  
+  head: () => ({
+    links: [
+      { rel: "stylesheet", href: appCss }
+    ],
+    meta: [
+      { charSet: "utf-8" },
+      { name: "viewport", content: "width=device-width, initial-scale=1" }
+    ]
+  }),
+  
+  component: RootComponent
+})
+
+function RootComponent() {
+  return (
+    <html lang="en">
+      <head>
+        <Meta />
+        <Links />
+      </head>
+      <body>
+        <Outlet />
+        <Scripts />
+      </body>
+    </html>
+  )
+}
+```
+
+### Nested Layout
+
+```tsx
+// routes/organizations/$organizationId/route.tsx
+import { createFileRoute, Outlet } from "@tanstack/react-start"
+import { AppLayout } from "@/components/layout/AppLayout"
+
+export const Route = createFileRoute("/organizations/$organizationId")({
+  loader: async ({ request, params }) => {
+    // Load organization for all nested routes
+    const cookie = request.headers.get("cookie")
+    const { data, error } = await api.GET("/api/v1/organizations/{id}", {
+      params: { path: { id: params.organizationId } },
+      headers: cookie ? { cookie } : undefined
+    })
+    
+    if (error) {
+      throw new Error("Organization not found")
+    }
+    
+    return { organization: data }
+  },
+  component: OrganizationLayout
+})
+
+function OrganizationLayout() {
+  const { organization } = Route.useLoaderData()
+  
+  return (
+    <AppLayout>
+      <div className="mb-4">
+        <h2 className="text-xl font-semibold">{organization.name}</h2>
+      </div>
+      <Outlet />
+    </AppLayout>
+  )
+}
+```
+
+## Authentication Guards
+
+### beforeLoad for Route Protection
+
+```tsx
+export const Route = createFileRoute("/organizations/")({
+  beforeLoad: async ({ context }) => {
+    // Redirect to login if not authenticated
+    if (!context.user) {
+      throw redirect({ to: "/login" })
+    }
+  },
+  loader: async ({ request }) => {
+    // User is guaranteed to exist here
+    // ...
+  },
+  component: OrganizationsPage
+})
+```
+
+### Role-Based Access
+
+```tsx
+export const Route = createFileRoute("/admin/")({
+  beforeLoad: async ({ context }) => {
+    if (!context.user) {
+      throw redirect({ to: "/login" })
+    }
+    
+    if (context.user.role !== "Admin") {
+      throw redirect({ to: "/" })
+    }
+  },
+  component: AdminPage
+})
+```
+
+## Navigation
+
+### Link Component
+
+```tsx
+import { Link } from "@tanstack/react-router"
+
+// Type-safe navigation
+<Link
+  to="/organizations/$organizationId/companies/$companyId"
+  params={{ organizationId: "org_123", companyId: "comp_456" }}
+  className="text-blue-600 hover:underline"
+>
+  View Company
+</Link>
+
+// With search params
+<Link
+  to="/journal-entries"
+  search={{ page: 1, status: "Posted" }}
+>
+  View Posted Entries
+</Link>
+```
+
+### Programmatic Navigation
+
+```tsx
+import { useRouter, useNavigate } from "@tanstack/react-router"
+
+function CreateCompanyForm() {
+  const router = useRouter()
+  const navigate = useNavigate()
+  
+  const handleSubmit = async () => {
+    const { data, error } = await api.POST("/api/v1/companies", {
+      body: formData
+    })
+    
+    if (error) {
+      // Handle error
+      return
+    }
+    
+    // Refetch all loader data
+    await router.invalidate()
+    
+    // Navigate to new company
+    navigate({
+      to: "/organizations/$organizationId/companies/$companyId",
+      params: {
+        organizationId: data.organizationId,
+        companyId: data.id
+      }
+    })
+  }
+  
+  return <form onSubmit={handleSubmit}>...</form>
+}
+```
+
+### Back Navigation
+
+```tsx
+import { useRouter } from "@tanstack/react-router"
+
+function EditCompanyPage() {
+  const router = useRouter()
+  
+  return (
+    <Button onClick={() => router.history.back()}>
+      Cancel
+    </Button>
+  )
+}
+```
+
+## Data Revalidation
+
+### router.invalidate()
+
+**Call `router.invalidate()` after mutations** to refetch loader data:
+
+```tsx
+const handleDelete = async (id: string) => {
+  const { error } = await api.DELETE("/api/v1/companies/{id}", {
+    params: { path: { id } }
+  })
+  
+  if (error) {
+    alert("Failed to delete company")
+    return
+  }
+  
+  // Refetch loader data for current route
+  await router.invalidate()
+}
+```
+
+### Invalidate Specific Routes
+
+```tsx
+// Invalidate all routes
+await router.invalidate()
+
+// Invalidate specific route
+await router.invalidate({
+  routeId: "/organizations/$organizationId/companies/"
+})
+```
+
+## SEO and Meta Tags
+
+### Per-Route Meta
+
+```tsx
+export const Route = createFileRoute("/companies/$companyId/")({
+  head: ({ loaderData }) => ({
+    meta: [
+      { title: `${loaderData.company.name} - Accountability` },
+      { name: "description", content: `Details for ${loaderData.company.name}` }
+    ]
+  }),
+  loader: async ({ params }) => {
+    const { data } = await api.GET("/api/v1/companies/{id}", {
+      params: { path: { id: params.companyId } }
+    })
+    return { company: data }
+  },
+  component: CompanyDetailPage
+})
+```
+
+### Open Graph Tags
+
+```tsx
+head: ({ loaderData }) => ({
+  meta: [
+    { property: "og:title", content: loaderData.company.name },
+    { property: "og:type", content: "website" },
+    { property: "og:url", content: `https://app.accountability.com/companies/${loaderData.company.id}` },
+    { property: "og:image", content: "https://app.accountability.com/og-image.png" }
+  ]
+})
+```
+
+## Error Handling
+
+### Error Boundaries
+
+```tsx
+// routes/organizations/$organizationId/route.tsx
+export const Route = createFileRoute("/organizations/$organizationId")({
+  errorComponent: ({ error }) => {
+    return (
+      <div className="p-6">
+        <h1 className="text-2xl font-bold text-red-600">Error</h1>
+        <p className="text-gray-700 mt-2">{error.message}</p>
+        <Button onClick={() => window.location.reload()}>
+          Reload Page
+        </Button>
+      </div>
+    )
+  },
+  component: OrganizationLayout
+})
+```
+
+### Not Found Route
+
+```tsx
+// routes/$.tsx (catch-all route)
+import { createFileRoute } from "@tanstack/react-start"
+
+export const Route = createFileRoute("/$")({
+  component: NotFoundPage
+})
+
+function NotFoundPage() {
+  return (
+    <div className="flex flex-col items-center justify-center min-h-screen">
+      <h1 className="text-6xl font-bold text-gray-900">404</h1>
+      <p className="text-xl text-gray-600 mt-4">Page not found</p>
+      <Link to="/" className="mt-6">
+        <Button>Go Home</Button>
+      </Link>
+    </div>
+  )
+}
+```
+
+## Loading States
+
+### Pending Component
+
+```tsx
+export const Route = createFileRoute("/companies/")({
+  loader: async ({ request }) => {
+    // Slow loader
+    await new Promise(resolve => setTimeout(resolve, 2000))
+    return { companies: [] }
+  },
+  pendingComponent: () => (
+    <div className="flex items-center justify-center min-h-screen">
+      <LoadingSpinner />
+    </div>
+  ),
+  component: CompaniesPage
+})
+```
+
+### Skeleton Loaders
+
+```tsx
+function CompanyListSkeleton() {
+  return (
+    <div className="space-y-4">
+      {Array.from({ length: 5 }).map((_, i) => (
+        <div key={i} className="h-24 bg-gray-100 rounded animate-pulse" />
+      ))}
+    </div>
+  )
+}
+
+export const Route = createFileRoute("/companies/")({
+  pendingComponent: CompanyListSkeleton,
+  component: CompaniesPage
+})
+```
+
+## Route Generation
+
+### Generating Routes
+
+```bash
+# After adding/modifying routes
+pnpm generate-routes
+```
+
+This generates `routeTree.gen.ts` with type-safe route definitions.
+
+### Using Generated Types
+
+```tsx
+import type { Route } from "@/routeTree.gen"
+
+// Type-safe navigation
+const params: Route["/organizations/$organizationId/companies/$companyId/"]["params"] = {
+  organizationId: "org_123",
+  companyId: "comp_456"
+}
+```
+
+## Best Practices
+
+### 1. Always Forward Cookies
+
+```tsx
+// CORRECT
+loader: async ({ request }) => {
+  const cookie = request.headers.get("cookie")
+  const { data } = await api.GET("/api/v1/protected", {
+    headers: cookie ? { cookie } : undefined
+  })
+}
+
+// WRONG
+loader: async () => {
+  const { data } = await api.GET("/api/v1/protected") // No auth!
+}
+```
+
+### 2. Parallel Data Fetching
+
+```tsx
+// GOOD: Parallel
+loader: async ({ request }) => {
+  const cookie = request.headers.get("cookie")
+  const [companies, users] = await Promise.all([
+    api.GET("/api/v1/companies", { headers: cookie ? { cookie } : undefined }),
+    api.GET("/api/v1/users", { headers: cookie ? { cookie } : undefined })
+  ])
+  return { companies: companies.data, users: users.data }
+}
+
+// BAD: Sequential
+loader: async ({ request }) => {
+  const cookie = request.headers.get("cookie")
+  const companies = await api.GET("/api/v1/companies", {
+    headers: cookie ? { cookie } : undefined
+  })
+  const users = await api.GET("/api/v1/users", {
+    headers: cookie ? { cookie } : undefined
+  })
+  return { companies: companies.data, users: users.data }
+}
+```
+
+### 3. Invalidate After Mutations
+
+```tsx
+const handleSubmit = async () => {
+  const { error } = await api.POST("/api/v1/companies", { body })
+  
+  if (!error) {
+    // MUST invalidate to refetch data
+    await router.invalidate()
+  }
+}
+```
+
+### 4. Use beforeLoad for Auth
+
+```tsx
+// CORRECT: Check auth in beforeLoad
+beforeLoad: ({ context }) => {
+  if (!context.user) throw redirect({ to: "/login" })
+}
+
+// WRONG: Check auth in loader (loader still runs)
+loader: ({ context }) => {
+  if (!context.user) throw redirect({ to: "/login" })
+}
+```
+
+## Next Steps
+
+- [Frontend Architecture](/architecture/frontend-architecture) - React patterns and UI components
+- [Testing](/architecture/testing) - E2E testing with Playwright
+- [Error Handling](/architecture/error-handling) - Frontend error patterns

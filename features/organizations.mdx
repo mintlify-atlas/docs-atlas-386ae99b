@@ -1,0 +1,234 @@
+---
+title: Organizations
+description: Organization structure and multi-tenant model
+---
+
+## Overview
+
+Organizations are the top-level container entity in Accountability. Each organization owns multiple companies and defines the consolidated reporting currency for financial reports.
+
+<Info>
+Organizations enable multi-tenant isolation - each user belongs to one organization, and all data is scoped to that organization.
+</Info>
+
+## Organization Data Model
+
+Organizations contain the following core attributes:
+
+```typescript packages/core/src/organization/Organization.ts
+export class Organization extends Schema.Class<Organization>("Organization")({
+  id: OrganizationId,
+  name: Schema.NonEmptyTrimmedString,
+  reportingCurrency: CurrencyCode,
+  createdAt: Timestamp,
+  settings: OrganizationSettings
+})
+```
+
+### Key Properties
+
+<ResponseField name="id" type="OrganizationId (UUID)" required>
+  Unique identifier for the organization
+</ResponseField>
+
+<ResponseField name="name" type="string" required>
+  Display name of the organization (non-empty, trimmed)
+</ResponseField>
+
+<ResponseField name="reportingCurrency" type="CurrencyCode" required>
+  The currency used for consolidated reporting across all companies (ISO 4217 code)
+</ResponseField>
+
+<ResponseField name="settings" type="OrganizationSettings" required>
+  Organization-wide configuration settings
+</ResponseField>
+
+### Organization Settings
+
+Settings allow customization of locale, timezone, and display preferences:
+
+```typescript packages/core/src/organization/Organization.ts
+export class OrganizationSettings extends Schema.Class<OrganizationSettings>("OrganizationSettings")({
+  defaultLocale: Schema.String,        // Default: "en-US"
+  defaultTimezone: Schema.String,      // Default: "UTC"
+  defaultDecimalPlaces: Schema.Number  // Default: 2, range: 0-4
+})
+```
+
+<ResponseField name="defaultLocale" type="string" default="en-US">
+  Default locale for number and date formatting (e.g., "en-US", "en-GB", "de-DE")
+</ResponseField>
+
+<ResponseField name="defaultTimezone" type="string" default="UTC">
+  Default timezone (IANA identifier like "America/New_York", "Europe/London")
+</ResponseField>
+
+<ResponseField name="defaultDecimalPlaces" type="number" default="2">
+  Default decimal places for monetary display (0-4)
+</ResponseField>
+
+## Multi-Tenant Model
+
+Accountability uses a **single-tenant-per-organization** model:
+
+<Steps>
+  <Step title="User Authentication">
+    Users authenticate and select an organization
+  </Step>
+  <Step title="Data Isolation">
+    All data queries are scoped to the selected organization - companies, accounts, journal entries, etc.
+  </Step>
+  <Step title="Authorization">
+    Permissions are enforced at the organization level via role-based policies
+  </Step>
+</Steps>
+
+<Warning>
+Users cannot access data across organizations. Each organization's data is completely isolated.
+</Warning>
+
+## Creating an Organization
+
+### UI Workflow
+
+The organization creation form is located at `/organizations/new` and includes:
+
+<Tabs>
+  <Tab title="Required Fields">
+    - **Name**: Organization display name (2-100 characters)
+    - **Reporting Currency**: ISO 4217 currency code selected from dropdown
+  </Tab>
+  <Tab title="Optional Settings">
+    - **Default Locale**: Number/date format locale
+    - **Default Timezone**: IANA timezone identifier
+    - **Default Decimal Places**: 0-4 decimal places for monetary values
+  </Tab>
+</Tabs>
+
+### Form Component
+
+The `OrganizationForm` component handles creation with client-side validation:
+
+```tsx packages/web/src/components/forms/OrganizationForm.tsx
+export function OrganizationForm({
+  currencies,        // Loaded from /api/v1/currencies
+  onSubmit,          // Callback with form data
+  onCancel,          // Cancel handler
+  apiError,          // API error message
+  isSubmitting       // Submitting state
+}: OrganizationFormProps)
+```
+
+**Key Features:**
+- Currency dropdown with search (powered by `CurrencySelect` component)
+- Collapsible settings panel for advanced options
+- Inline validation errors for name and currency
+- Real-time field validation on blur
+
+### API Request
+
+Organizations are created via `POST /api/v1/organizations`:
+
+```typescript
+const { data, error } = await api.POST('/api/v1/organizations', {
+  body: {
+    name: "Acme Corporation",
+    reportingCurrency: "USD",
+    settings: {
+      defaultLocale: "en-US",
+      defaultTimezone: "America/New_York",
+      defaultDecimalPlaces: 2
+    }
+  }
+})
+```
+
+## Reporting Currency
+
+The organization's **reporting currency** is used for:
+
+1. **Consolidated Reports**: Balance sheets, income statements, and cash flow statements
+2. **Currency Translation**: Converting company functional currencies to reporting currency (ASC 830)
+3. **Intercompany Eliminations**: Matching intercompany transactions in a common currency
+
+<Note>
+The reporting currency can only be set during organization creation and cannot be changed afterward. Choose carefully based on your primary reporting requirements.
+</Note>
+
+### Translation Methods
+
+When consolidating companies with different functional currencies:
+
+- **Current Rate Method**: Assets and liabilities at current (closing) rate, equity at historical rates
+- **Temporal Method**: Monetary items at current rate, non-monetary at historical rates
+- **Translation Adjustments**: Recorded in "Other Comprehensive Income" equity account
+
+## Organization Selector
+
+Users can switch between organizations using the organization selector in the header:
+
+- **Location**: Available on every authenticated page
+- **Workflow**: Click selector → Choose organization → Page reloads with new organization context
+- **Persistence**: Selected organization is stored in session
+
+## Best Practices
+
+<AccordionGroup>
+  <Accordion title="Choosing a Reporting Currency">
+    Select the currency of your primary reporting jurisdiction:
+    - **US-based**: Use USD for SEC and GAAP reporting
+    - **EU-based**: Use EUR for IFRS reporting
+    - **Multinational**: Use the currency of your headquarters or parent company
+  </Accordion>
+
+  <Accordion title="Locale and Timezone Settings">
+    - Set **defaultLocale** to match your primary user base (affects number formatting)
+    - Set **defaultTimezone** to your headquarters location (affects date/time display)
+    - Individual users can override these in their profile settings
+  </Accordion>
+
+  <Accordion title="Decimal Places">
+    - **2 decimal places**: Standard for USD, EUR, GBP, most currencies
+    - **0 decimal places**: JPY, KRW (currencies without subunits)
+    - **3 decimal places**: KWD, BHD, OMR (currencies with 1/1000 subunits)
+  </Accordion>
+</AccordionGroup>
+
+## Technical Details
+
+### Schema Definition
+
+The `Organization` schema is defined using Effect Schema:
+
+```typescript packages/core/src/organization/Organization.ts
+export const OrganizationId = Schema.UUID.pipe(
+  Schema.brand("OrganizationId"),
+  Schema.annotations({
+    identifier: "OrganizationId",
+    title: "Organization ID",
+    description: "A unique identifier for an organization (UUID format)"
+  })
+)
+```
+
+### Type Guards
+
+```typescript
+import { isOrganization, isOrganizationId } from "@accountability/core/organization/Organization"
+
+// Check if value is a valid Organization
+if (isOrganization(value)) {
+  // TypeScript knows value is Organization
+}
+
+// Check if value is a valid OrganizationId
+if (isOrganizationId(value)) {
+  // TypeScript knows value is OrganizationId
+}
+```
+
+## Related Pages
+
+- [Companies](/features/companies) - Legal entities within an organization
+- [Multi-Currency](/features/multi-currency) - Currency translation and exchange rates
+- [Chart of Accounts](/features/chart-of-accounts) - Account structure per company

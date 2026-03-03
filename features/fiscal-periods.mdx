@@ -1,0 +1,498 @@
+---
+title: Fiscal Periods
+description: Fiscal years, periods, period 13, and opening/closing periods
+---
+
+## Overview
+
+Fiscal periods divide the fiscal year into manageable accounting periods. Accountability supports:
+
+- **12 regular periods** (typically monthly)
+- **1 adjustment period** (Period 13) for year-end adjustments
+- **Period status tracking** (Open, Closed)
+- **Period locking** for compliance and control
+
+<Info>
+Fiscal periods are **company-specific**. Each company defines its own fiscal year end, and periods are automatically generated based on that date.
+</Info>
+
+## Fiscal Year Data Model
+
+```typescript packages/core/src/fiscal/FiscalYear.ts
+export class FiscalYear extends Schema.Class<FiscalYear>("FiscalYear")({
+  id: FiscalYearId,
+  companyId: CompanyId,
+  name: Schema.NonEmptyTrimmedString,
+  year: Schema.Number,  // e.g., 2025
+  startDate: LocalDate,
+  endDate: LocalDate,
+  status: FiscalYearStatus,
+  includesAdjustmentPeriod: Schema.Boolean,
+  createdAt: Timestamp,
+  updatedAt: Timestamp
+})
+```
+
+<ResponseField name="year" type="number" required>
+  The fiscal year number (2025, 2026, etc.) - named after the calendar year in which the fiscal year **ends**
+</ResponseField>
+
+<ResponseField name="startDate" type="LocalDate" required>
+  First day of the fiscal year (calculated from fiscal year end)
+</ResponseField>
+
+<ResponseField name="endDate" type="LocalDate" required>
+  Last day of the fiscal year (from company's fiscal year end setting)
+</ResponseField>
+
+<ResponseField name="status" type="FiscalYearStatus" required>
+  Current status: "Open" or "Closed"
+</ResponseField>
+
+<ResponseField name="includesAdjustmentPeriod" type="boolean" required>
+  Whether Period 13 exists for year-end adjustments
+</ResponseField>
+
+## Fiscal Period Data Model
+
+```typescript packages/core/src/fiscal/FiscalPeriod.ts
+export class FiscalPeriod extends Schema.Class<FiscalPeriod>("FiscalPeriod")({
+  id: FiscalPeriodId,
+  fiscalYearId: FiscalYearId,
+  periodNumber: Schema.Number,  // 1-13
+  name: Schema.NonEmptyTrimmedString,
+  periodType: FiscalPeriodType,
+  startDate: LocalDate,
+  endDate: LocalDate,
+  status: FiscalPeriodStatus,
+  closedBy: Schema.OptionFromNullOr(UserId),
+  closedAt: Schema.OptionFromNullOr(Timestamp),
+  createdAt: Timestamp,
+  updatedAt: Timestamp
+})
+```
+
+<ResponseField name="periodNumber" type="number" required>
+  Period number within fiscal year (1-12 for regular periods, 13 for adjustment)
+</ResponseField>
+
+<ResponseField name="periodType" type="FiscalPeriodType" required>
+  "Regular" (1-12) or "Adjustment" (13)
+</ResponseField>
+
+<ResponseField name="status" type="FiscalPeriodStatus" required>
+  Current status: "Open" or "Closed"
+</ResponseField>
+
+## Period Types
+
+```typescript packages/core/src/fiscal/FiscalPeriodType.ts
+export const FiscalPeriodType = Schema.Literal("Regular", "Adjustment")
+```
+
+<Tabs>
+  <Tab title="Regular Periods (1-12)">
+    Standard monthly accounting periods
+    
+    - Correspond to calendar months (or fiscal months)
+    - Used for normal business transactions
+    - Typically opened at start of month, closed at end
+    
+    **Examples**:
+    - P1 (January 1-31 for calendar year)
+    - P12 (December 1-31 for calendar year)
+  </Tab>
+  <Tab title="Adjustment Period (13)">
+    Special period for year-end adjusting entries
+    
+    - No date range (conceptually "after" P12)
+    - Used for audit adjustments, final accruals
+    - Posted entries dated to fiscal year end
+    - Closed before fiscal year is finalized
+    
+    **Use for**:
+    - Year-end audit adjustments
+    - Final depreciation entries
+    - Accruals discovered after P12 close
+  </Tab>
+</Tabs>
+
+<Warning>
+**Mandatory Period 13**: All companies **must** have Period 13 for year-end adjustments. The `includesAdjustmentPeriod` flag on fiscal years is always `true`.
+</Warning>
+
+## Period Status
+
+```typescript packages/core/src/fiscal/FiscalPeriodStatus.ts
+export const FiscalPeriodStatus = Schema.Literal("Open", "Closed")
+```
+
+<Steps>
+  <Step title="Open">
+    Period accepts new journal entries
+    
+    - Users can create, edit, and post entries
+    - Normal operations allowed
+  </Step>
+  <Step title="Closed">
+    Period is locked - no modifications allowed
+    
+    - Cannot create new journal entries
+    - Cannot edit or delete existing entries
+    - Cannot reverse posted entries
+    - Requires "Reopen Period" permission to unlock
+  </Step>
+</Steps>
+
+### Period Close Workflow
+
+<Steps>
+  <Step title="Review Period Activity">
+    Verify all transactions are recorded and balanced
+    
+    - Run trial balance report
+    - Review outstanding items
+    - Reconcile bank accounts
+  </Step>
+  <Step title="Post Adjusting Entries">
+    Record any period-end adjustments
+    
+    - Accruals and deferrals
+    - Depreciation
+    - Corrections
+  </Step>
+  <Step title="Close Period">
+    Change period status from Open to Closed
+    
+    - Records `closedBy` (user ID)
+    - Records `closedAt` (timestamp)
+    - Period becomes read-only
+  </Step>
+  <Step title="Open Next Period">
+    Open the following period for new transactions
+    
+    - Period 1 opens Period 2
+    - Period 12 opens Period 13 (adjustment)
+    - Period 13 close finalizes the fiscal year
+  </Step>
+</Steps>
+
+## Fiscal Period Reference
+
+Journal entries reference fiscal periods using `FiscalPeriodRef`:
+
+```typescript packages/core/src/fiscal/FiscalPeriodRef.ts
+export class FiscalPeriodRef extends Schema.Class<FiscalPeriodRef>("FiscalPeriodRef")({
+  year: Schema.Number,   // 2025
+  period: Schema.Number  // 1-13
+})
+```
+
+### Helper Methods
+
+```typescript
+const ref = FiscalPeriodRef.make({ year: 2025, period: 3 })
+
+ref.isRegularPeriod       // true (1-12)
+ref.isAdjustmentPeriod    // false (period !== 13)
+ref.toString()            // "FY2025-P03"
+ref.toShortString()       // "2025.03"
+```
+
+### Period Navigation
+
+```typescript
+import { nextPeriod, previousPeriod } from "@accountability/core/fiscal/FiscalPeriodRef"
+
+const p3 = FiscalPeriodRef.make({ year: 2025, period: 3 })
+const p4 = nextPeriod(p3)       // { year: 2025, period: 4 }
+const p2 = previousPeriod(p3)   // { year: 2025, period: 2 }
+
+// Wrap at year boundary
+const p12 = FiscalPeriodRef.make({ year: 2025, period: 12 })
+const p1_2026 = nextPeriod(p12)  // { year: 2026, period: 1 }
+
+// Period 13 handling
+const p13 = FiscalPeriodRef.make({ year: 2025, period: 13 })
+const next = nextPeriod(p13)      // { year: 2026, period: 1 }
+const prev = previousPeriod(p13)  // { year: 2025, period: 12 }
+```
+
+### Period Ordering
+
+```typescript
+import { isBefore, isAfter, equals } from "@accountability/core/fiscal/FiscalPeriodRef"
+
+const p1 = FiscalPeriodRef.make({ year: 2025, period: 1 })
+const p2 = FiscalPeriodRef.make({ year: 2025, period: 2 })
+
+isBefore(p1, p2)  // true
+isAfter(p1, p2)   // false
+equals(p1, p1)    // true
+```
+
+## Period 13 (Adjustment Period)
+
+Period 13 is a **mandatory adjustment period** for year-end entries:
+
+<Info>
+**Why Period 13?**
+
+After closing Period 12 (December), accountants often discover:
+- Audit adjustments
+- Late vendor invoices
+- Tax accruals
+- Final depreciation entries
+
+Period 13 provides a "staging area" for these adjustments without reopening P12.
+</Info>
+
+### Using Period 13
+
+<Steps>
+  <Step title="Close Period 12">
+    Lock the final regular period
+    
+    - All normal business activity is complete
+    - Regular month-end close performed
+  </Step>
+  <Step title="Post to Period 13">
+    Record year-end adjusting entries
+    
+    - Entry type: "Adjusting"
+    - Transaction date: Fiscal year end date
+    - Fiscal period: Year 2025, Period 13
+    
+    **Note**: Transaction date remains fiscal year end (e.g., Dec 31), but fiscal period is 13
+  </Step>
+  <Step title="Close Period 13">
+    Lock adjustment period
+    
+    - Finalizes the fiscal year
+    - No further adjustments allowed
+  </Step>
+  <Step title="Open Next Fiscal Year">
+    Open Period 1 of FY2026
+    
+    - Begins new fiscal year
+    - Carries forward balance sheet balances
+  </Step>
+</Steps>
+
+### UI Workflow for Period 13
+
+When creating a journal entry with a transaction date on the fiscal year end:
+
+```tsx packages/web/src/components/forms/JournalEntryForm.tsx
+{canPostToAdjustmentPeriod && (
+  <div>
+    <label>
+      <input
+        type="checkbox"
+        checked={useAdjustmentPeriod}
+        onChange={(e) => setUseAdjustmentPeriod(e.target.checked)}
+      />
+      Post to adjustment period (P13)
+    </label>
+    <p>Use for year-end adjustments and audit entries</p>
+  </div>
+)}
+```
+
+<Warning>
+**Period 13 Restrictions**:
+- Only available when P12 is closed and P13 is open
+- All entries must use entry type "Adjusting", "Closing", or "Revaluation"
+- Do not post regular business transactions to P13
+</Warning>
+
+## Period Reopening
+
+Closed periods can be reopened with proper authorization:
+
+```typescript
+// Reopen audit entry
+interface PeriodReopenAuditEntry {
+  id: PeriodReopenAuditEntryId
+  periodId: FiscalPeriodId
+  reason: string
+  reopenedBy: UserId
+  reopenedAt: Timestamp
+  previousStatus: FiscalPeriodStatus
+}
+```
+
+<Steps>
+  <Step title="Authorization Check">
+    User must have "Reopen Closed Period" permission
+    
+    Typically restricted to Controllers or above
+  </Step>
+  <Step title="Provide Reason">
+    Required justification for reopening
+    
+    Example: "Discovered unrecorded invoice #12345"
+  </Step>
+  <Step title="Reopen Period">
+    Period status changes from Closed → Open
+    
+    Audit entry created with reason and user
+  </Step>
+  <Step title="Make Corrections">
+    Post correcting entries
+  </Step>
+  <Step title="Re-Close Period">
+    Close period again after corrections
+  </Step>
+</Steps>
+
+<Note>
+All period reopen events are logged in the audit trail with:
+- Who reopened the period
+- When it was reopened
+- Why it was reopened
+- Previous status
+
+This maintains compliance and accountability.
+</Note>
+
+## Fiscal Period Assignment
+
+Journal entry fiscal periods are **automatically computed** from the transaction date and company fiscal year end:
+
+```typescript packages/web/src/components/forms/JournalEntryForm.tsx
+function computeFiscalPeriod(
+  dateStr: string,
+  fiscalYearEnd: FiscalYearEnd
+): ComputedPeriod {
+  // Determines fiscal year
+  // Calculates period number (1-12) based on months from FY start
+  // Returns computed period
+}
+```
+
+### Calendar Year Example
+
+Company with **December 31** fiscal year end:
+
+| Transaction Date | Fiscal Year | Period |
+|------------------|-------------|--------|
+| Jan 15, 2025     | 2025        | P1     |
+| Jun 30, 2025     | 2025        | P6     |
+| Dec 31, 2025     | 2025        | P12    |
+
+### Non-Calendar Year Example
+
+Company with **March 31** fiscal year end:
+
+| Transaction Date | Fiscal Year | Period |
+|------------------|-------------|--------|
+| Apr 1, 2024      | 2025        | P1     |
+| Dec 15, 2024     | 2025        | P9     |
+| Mar 31, 2025     | 2025        | P12    |
+| Apr 1, 2025      | 2026        | P1     |
+
+<Info>
+Fiscal year is named after the calendar year in which it **ends**. A fiscal year ending March 31, 2025 is "FY2025", even though it starts in April 2024.
+</Info>
+
+## Period Validation
+
+When posting journal entries, the system validates:
+
+<AccordionGroup>
+  <Accordion title="Period Exists">
+    The fiscal period must exist for the company
+    
+    ✓ Valid: Posting to P3 FY2025 when period exists
+    ✗ Invalid: Posting to P5 FY2026 when FY2026 hasn't been created yet
+  </Accordion>
+
+  <Accordion title="Period is Open">
+    The period status must be "Open"
+    
+    ✓ Valid: Posting to open period
+    ✗ Invalid: Posting to closed period (returns error)
+  </Accordion>
+
+  <Accordion title="Date Matches Period">
+    Transaction date must fall within period date range (except P13)
+    
+    ✓ Valid: March 15 posting to P3 (March period)
+    ✗ Invalid: March 15 posting to P4 (April period)
+    
+    **Exception**: P13 allows any date on fiscal year end
+  </Accordion>
+</AccordionGroup>
+
+## Period Deadlines
+
+Organizations often set internal deadlines for period close:
+
+<Tabs>
+  <Tab title="Monthly Close">
+    **Target**: 5-7 business days after month end
+    
+    - Day 1-3: Transaction review and reconciliation
+    - Day 4-5: Adjusting entries and accruals
+    - Day 6-7: Period close and reporting
+  </Tab>
+  <Tab title="Quarter Close">
+    **Target**: 10-15 business days after quarter end
+    
+    - Additional time for quarterly analysis
+    - Detailed variance analysis
+    - Management review meetings
+  </Tab>
+  <Tab title="Year-End Close">
+    **Target**: 30-45 days after year end
+    
+    - Period 12 close: 10 days
+    - Period 13 open: 20-35 days for audit adjustments
+    - Final close and financial statement preparation
+  </Tab>
+</Tabs>
+
+## Best Practices
+
+<AccordionGroup>
+  <Accordion title="Period Close Checklist">
+    Before closing each period:
+    
+    1. **Reconciliations**: Bank, credit card, intercompany
+    2. **Accruals**: Recognize expenses/revenues earned but not invoiced
+    3. **Deferrals**: Defer revenue/expenses to future periods
+    4. **Depreciation**: Record monthly depreciation
+    5. **Trial Balance**: Review account balances for anomalies
+    6. **Management Review**: Controllers review before close
+  </Accordion>
+
+  <Accordion title="Period 13 Usage Guidelines">
+    **DO use P13 for:**
+    - Audit adjustments
+    - Reclassifications discovered after P12 close
+    - Final tax accruals
+    - Year-end depreciation adjustments
+    
+    **DON'T use P13 for:**
+    - Regular business transactions
+    - Anything that should have been in P1-P12
+    - New fiscal year activity (use P1 of next FY)
+  </Accordion>
+
+  <Accordion title="Period Reopening Policy">
+    Establish clear policies:
+    
+    1. **Authorization**: Who can approve reopening? (Controller, CFO)
+    2. **Documentation**: Required justification and supporting docs
+    3. **Timeline**: How far back can periods be reopened?
+    4. **Notification**: Inform accounting team when periods reopen
+    5. **Re-close**: Set deadline for corrections and re-close
+  </Accordion>
+</AccordionGroup>
+
+## Related Pages
+
+- [Journal Entries](/features/journal-entries) - Posting entries to fiscal periods
+- [Companies](/features/companies) - Fiscal year end configuration
+- [Chart of Accounts](/features/chart-of-accounts) - Account setup for period operations

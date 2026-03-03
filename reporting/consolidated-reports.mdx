@@ -1,0 +1,406 @@
+---
+title: 'Consolidated Reports'
+description: 'Generate consolidated financial statements across multiple entities'
+icon: 'layer-group'
+---
+
+## Overview
+
+Consolidated financial reports present the financial position and performance of a group of companies as a single economic entity. They combine trial balances from multiple member companies, eliminate intercompany transactions, and properly account for non-controlling interests (NCI).
+
+<Info>
+Consolidated reports are generated using `ConsolidatedReportService` in `packages/core/src/reporting/ConsolidatedReportService.ts`, following ASC 810 consolidation standards.
+</Info>
+
+## Report Types
+
+The service generates four types of consolidated financial statements:
+
+### 1. Consolidated Balance Sheet
+
+Shows the group's financial position at a point in time, including:
+- Assets (current and non-current)
+- Liabilities (current and non-current)
+- Equity (parent company equity)
+- Non-Controlling Interest (NCI) in subsidiaries
+
+### 2. Consolidated Income Statement
+
+Shows the group's financial performance for a period, including:
+- Revenue and expenses
+- Net income
+- Attribution to parent and NCI
+
+### 3. Consolidated Cash Flow Statement
+
+Shows the group's cash flows for a period:
+- Operating activities (indirect method)
+- Investing activities
+- Financing activities
+- Net change in cash
+
+### 4. Consolidated Statement of Changes in Equity
+
+Shows movements in equity components:
+- Common stock
+- Additional paid-in capital
+- Retained earnings
+- Accumulated other comprehensive income
+- Non-controlling interest
+
+## Consolidation Process
+
+<Steps>
+<Step title="Run consolidation">
+First, create and complete a consolidation run using the `ConsolidationService`. This produces a `ConsolidatedTrialBalance` containing:
+- Aggregated balances from all member companies
+- Elimination adjustments for intercompany transactions
+- NCI allocations
+- Final consolidated balances
+</Step>
+
+<Step title="Select report type">
+Choose which consolidated financial statement to generate from the completed consolidation run.
+</Step>
+
+<Step title="Generate report">
+The `ConsolidatedReportService` transforms the trial balance into the requested financial statement format with proper sectional organization.
+</Step>
+
+<Step title="Review and export">
+Review the consolidated report, verify balances, and export in your preferred format.
+</Step>
+</Steps>
+
+## Service Methods
+
+### generateBalanceSheet
+
+Generates a consolidated balance sheet from a trial balance.
+
+```typescript
+interface GenerateBalanceSheetInput {
+  trialBalance: ConsolidatedTrialBalance
+  groupName: string  // Consolidated group name
+}
+
+function generateBalanceSheet(
+  input: GenerateBalanceSheetInput
+): Effect<ConsolidatedBalanceSheetReport, ConsolidatedBalanceSheetNotBalancedError>
+```
+
+**Returns**: `ConsolidatedBalanceSheetReport` with all sections and NCI
+
+**Structure**:
+```typescript
+interface ConsolidatedBalanceSheetReport {
+  runId: ConsolidationRunId
+  groupName: string
+  asOfDate: LocalDate
+  currency: CurrencyCode
+  currentAssets: ConsolidatedReportSection
+  nonCurrentAssets: ConsolidatedReportSection
+  totalAssets: number
+  currentLiabilities: ConsolidatedReportSection
+  nonCurrentLiabilities: ConsolidatedReportSection
+  totalLiabilities: number
+  equity: ConsolidatedReportSection
+  nonControllingInterest: number
+  totalEquity: number
+  totalLiabilitiesAndEquity: number
+}
+```
+
+### generateIncomeStatement
+
+Generates a consolidated income statement from a trial balance.
+
+```typescript
+interface GenerateIncomeStatementInput {
+  trialBalance: ConsolidatedTrialBalance
+  groupName: string
+}
+
+function generateIncomeStatement(
+  input: GenerateIncomeStatementInput
+): Effect<ConsolidatedIncomeStatementReport>
+```
+
+**Returns**: `ConsolidatedIncomeStatementReport` with NCI attribution
+
+**Structure**:
+```typescript
+interface ConsolidatedIncomeStatementReport {
+  runId: ConsolidationRunId
+  groupName: string
+  periodRef: FiscalPeriodRef
+  asOfDate: LocalDate
+  currency: CurrencyCode
+  revenue: ConsolidatedReportSection
+  costOfSales: ConsolidatedReportSection
+  grossProfit: number
+  operatingExpenses: ConsolidatedReportSection
+  operatingIncome: number
+  otherIncomeExpense: ConsolidatedReportSection
+  incomeBeforeTax: number
+  taxExpense: number
+  netIncome: number
+  netIncomeAttributableToParent: number
+  netIncomeAttributableToNCI: number
+}
+```
+
+### generateCashFlow
+
+Generates a consolidated cash flow statement.
+
+```typescript
+interface GenerateCashFlowInput {
+  trialBalance: ConsolidatedTrialBalance
+  priorTrialBalance?: ConsolidatedTrialBalance  // For working capital changes
+  groupName: string
+}
+
+function generateCashFlow(
+  input: GenerateCashFlowInput
+): Effect<ConsolidatedCashFlowReport>
+```
+
+**Structure**:
+```typescript
+interface ConsolidatedCashFlowReport {
+  runId: ConsolidationRunId
+  groupName: string
+  periodRef: FiscalPeriodRef
+  asOfDate: LocalDate
+  currency: CurrencyCode
+  operatingActivities: ConsolidatedReportSection
+  investingActivities: ConsolidatedReportSection
+  financingActivities: ConsolidatedReportSection
+  netChangeInCash: number
+  beginningCash: number
+  endingCash: number
+}
+```
+
+### generateEquityStatement
+
+Generates a consolidated statement of changes in equity.
+
+```typescript
+interface GenerateEquityStatementInput {
+  trialBalance: ConsolidatedTrialBalance
+  priorTrialBalance?: ConsolidatedTrialBalance  // For opening balances
+  groupName: string
+}
+
+function generateEquityStatement(
+  input: GenerateEquityStatementInput
+): Effect<ConsolidatedEquityStatementReport>
+```
+
+**Structure**:
+```typescript
+interface ConsolidatedEquityStatementReport {
+  runId: ConsolidationRunId
+  groupName: string
+  periodRef: FiscalPeriodRef
+  asOfDate: LocalDate
+  currency: CurrencyCode
+  openingBalance: EquityMovementRow
+  movements: EquityMovementRow[]  // Changes during period
+  closingBalance: EquityMovementRow
+}
+
+interface EquityMovementRow {
+  description: string
+  commonStock: number
+  additionalPaidInCapital: number
+  retainedEarnings: number
+  accumulatedOCI: number
+  nonControllingInterest: number
+  total: number
+}
+```
+
+## Account Category Mapping
+
+### Balance Sheet Sections
+
+| Section | Account Categories |
+|---------|-------------------|
+| Current Assets | `CurrentAsset` |
+| Non-Current Assets | `NonCurrentAsset`, `FixedAsset`, `IntangibleAsset` |
+| Current Liabilities | `CurrentLiability` |
+| Non-Current Liabilities | `NonCurrentLiability` |
+| Equity | `ContributedCapital`, `RetainedEarnings`, `OtherComprehensiveIncome`, `TreasuryStock` |
+
+### Income Statement Sections
+
+| Section | Account Categories |
+|---------|-------------------|
+| Revenue | `OperatingRevenue` |
+| Cost of Sales | `CostOfGoodsSold` |
+| Operating Expenses | `OperatingExpense`, `DepreciationAmortization` |
+| Other Income/Expense | `OtherRevenue`, `InterestExpense`, `OtherExpense` |
+| Tax Expense | `TaxExpense` |
+
+## Non-Controlling Interest (NCI)
+
+Consolidated reports properly account for NCI per ASC 810:
+
+### Balance Sheet NCI
+
+NCI appears in the equity section, representing the portion of subsidiaries owned by minority shareholders.
+
+```
+Total Equity = Parent Equity + Non-Controlling Interest
+```
+
+### Income Statement NCI
+
+Net income is attributed to both parent and NCI:
+
+```
+Net Income
+- Net Income Attributable to NCI
+= Net Income Attributable to Parent
+```
+
+### Equity Statement NCI
+
+NCI is tracked as a separate column showing:
+- Opening NCI balance
+- NCI share of net income
+- Dividends paid to NCI
+- Other changes in NCI
+- Closing NCI balance
+
+## Report Line Items
+
+Consolidated reports use a simplified line item structure:
+
+```typescript
+interface ConsolidatedReportLineItem {
+  description: string           // Account name or label
+  amount: number               // Display amount
+  style: "Normal" | "Subtotal" | "Total" | "Header"
+  indentLevel: number          // 0-based indentation
+}
+```
+
+## UI Workflow
+
+<Tabs>
+  <Tab title="Generate from Consolidation">
+    1. Navigate to **Consolidation** → **Runs**
+    2. Select a completed consolidation run
+    3. Click **Generate Reports**
+    4. Choose report type:
+       - Consolidated Balance Sheet
+       - Consolidated Income Statement
+       - Consolidated Cash Flow Statement
+       - Consolidated Equity Statement
+    5. Review the consolidated report
+    6. Verify NCI calculations
+    7. Export to PDF or Excel
+  </Tab>
+  
+  <Tab title="Full Financial Package">
+    1. Navigate to **Consolidation** → **Runs**
+    2. Select a completed consolidation run
+    3. Click **Generate Full Package**
+    4. System generates all four statements:
+       - Balance Sheet (with NCI)
+       - Income Statement (with NCI attribution)
+       - Cash Flow Statement
+       - Equity Statement (with NCI column)
+    5. Review complete consolidated financials
+    6. Export as combined PDF package
+  </Tab>
+  
+  <Tab title="Period Comparison">
+    1. Generate current period consolidated reports
+    2. Generate prior period consolidated reports
+    3. Click **Compare Periods**
+    4. Review side-by-side comparison:
+       - Balance sheet changes
+       - Income statement trends
+       - Cash flow patterns
+       - Equity movements
+    5. Export comparative package
+  </Tab>
+</Tabs>
+
+## Validation and Balancing
+
+### Balance Sheet Validation
+
+The consolidated balance sheet validates:
+
+```typescript
+totalAssets === totalLiabilities + totalEquity + nonControllingInterest
+```
+
+A tolerance of 0.01 is allowed for rounding differences.
+
+### Income Statement Validation
+
+```typescript
+netIncome === netIncomeAttributableToParent + netIncomeAttributableToNCI
+```
+
+## Export Formats
+
+Consolidated reports support:
+
+- **PDF**: Professional formatted consolidated financials
+- **Excel**: Multi-sheet workbook with all four statements
+- **CSV**: Individual statement exports
+- **JSON**: Structured data for API integration
+
+## Best Practices
+
+1. **Complete Consolidation First**: Always run consolidation to completion before generating reports
+2. **Review Eliminations**: Verify intercompany eliminations are correct before report generation
+3. **NCI Verification**: Confirm NCI percentages and calculations are accurate
+4. **Full Package**: Generate all four statements together for complete financial picture
+5. **Period Consistency**: Use the same fiscal period for all consolidated reports
+6. **Currency Translation**: Ensure all member companies are translated to group currency
+
+## Common Issues
+
+| Issue | Cause | Resolution |
+|-------|-------|------------|
+| Balance sheet doesn't balance | Incomplete eliminations | Review consolidation eliminations and NCI calculations |
+| Missing NCI amounts | NCI not calculated in consolidation | Verify ownership percentages in consolidation setup |
+| Incorrect sections | Wrong account categories | Update account category mapping in member companies |
+| Prior period comparison fails | Different consolidation scope | Ensure same member companies in both periods |
+
+<Info>
+Consolidated reports are only available after completing a consolidation run. The trial balance from the run contains all necessary aggregated, eliminated, and NCI-adjusted balances.
+</Info>
+
+## Intercompany Eliminations
+
+The consolidation process (before report generation) handles:
+
+- **Intercompany revenue/expenses**: Eliminated from income statement
+- **Intercompany receivables/payables**: Eliminated from balance sheet
+- **Intercompany profits**: Eliminated from inventory and equity
+- **Intercompany investments**: Eliminated and replaced with NCI
+
+<Note>
+The consolidated reports display the final balances after all eliminations have been applied. To review elimination details, see the consolidation run detail page.
+</Note>
+
+## Multi-Currency Consolidation
+
+When consolidating entities with different functional currencies:
+
+1. **Translation**: Each subsidiary's trial balance is translated to the group's reporting currency
+2. **Translation Adjustments**: Cumulative translation adjustments appear in Accumulated OCI
+3. **NCI Translation**: NCI is calculated in the reporting currency after translation
+4. **Rates Used**: Historical rates for equity, closing rates for assets/liabilities, average rates for income statement
+
+All consolidated reports are presented in a single reporting currency for consistency.

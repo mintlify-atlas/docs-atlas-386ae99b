@@ -1,0 +1,329 @@
+---
+title: 'Income Statement'
+description: 'Generate income statement (P&L) reports showing financial performance over time'
+icon: 'chart-line'
+---
+
+## Overview
+
+The income statement (also called Profit & Loss or P&L) reports a company's financial performance over a period of time, showing revenues, expenses, and resulting net income. It follows the multi-step format per ASC 220 with expenses grouped by function.
+
+<Info>
+Income statements are generated using `IncomeStatementService` in `packages/core/src/reporting/IncomeStatementService.ts`, following ASC 220 standards for expense presentation.
+</Info>
+
+## Report Structure
+
+### Multi-Step Format
+
+The income statement uses a multi-step format providing key subtotals for analysis:
+
+```
+Revenue
+  - Cost of Sales
+  = Gross Profit
+  - Operating Expenses
+  = Operating Income
+  + Other Income/Expense
+  = Income Before Tax
+  - Income Tax Expense
+  = Net Income
+```
+
+### Sections
+
+<Tabs>
+  <Tab title="Revenue">
+    **Operating Revenue**
+    - Product sales
+    - Service revenue
+    - Subscription revenue
+    
+    **Other Revenue**
+    - Interest income
+    - Gains on asset sales
+    - Other miscellaneous income
+  </Tab>
+  
+  <Tab title="Expenses">
+    **Cost of Sales (COGS)**
+    - Direct materials
+    - Direct labor
+    - Manufacturing overhead
+    
+    **Operating Expenses** (by function)
+    - Selling expenses
+    - General and administrative
+    - Research and development
+    - Depreciation and amortization
+    
+    **Other Expenses**
+    - Interest expense
+    - Losses on asset sales
+    - Other non-operating expenses
+    
+    **Income Tax Expense**
+    - Current tax expense
+    - Deferred tax expense
+  </Tab>
+</Tabs>
+
+### Line Items
+
+Each line item includes:
+
+```typescript
+interface IncomeStatementLineItem {
+  accountId?: AccountId              // null for subtotals/totals
+  accountNumber?: string             // for display and sorting
+  description: string                // account name or label
+  currentAmount: MonetaryAmount      // current period amount
+  comparativeAmount?: MonetaryAmount // prior period (if requested)
+  variance?: MonetaryAmount          // absolute variance
+  variancePercentage?: number        // variance as percentage
+  isSubtotal: boolean
+  indentLevel: number                // for hierarchical display
+  style: "Normal" | "Subtotal" | "Total" | "Header"
+}
+```
+
+### Key Subtotals
+
+- **Gross Profit**: Revenue - Cost of Sales
+- **Operating Income**: Gross Profit - Operating Expenses
+- **Income Before Tax**: Operating Income + Other Income/Expense
+- **Net Income**: Income Before Tax - Income Tax Expense
+
+## Generating an Income Statement
+
+<Steps>
+<Step title="Select company and period">
+Choose the company and the reporting period (start date and end date). Unlike the balance sheet, the income statement covers a period of time.
+</Step>
+
+<Step title="Configure comparative period (optional)">
+Optionally select a comparative period (e.g., prior year same period) to show period-over-period performance changes.
+</Step>
+
+<Step title="Set display options">
+- **Include zero balances**: Show or hide accounts with no activity
+- **Show account numbers**: Display account codes
+- **Expense grouping**: By function (default per ASC 220) or by nature
+</Step>
+
+<Step title="Generate report">
+The service calculates period balances using `calculatePeriodBalance` for each revenue and expense account, then organizes them into the multi-step format.
+</Step>
+</Steps>
+
+## Service Methods
+
+### generateIncomeStatement
+
+Generates a complete income statement report.
+
+```typescript
+interface GenerateIncomeStatementInput {
+  companyId: CompanyId
+  periodStart: LocalDate
+  periodEnd: LocalDate
+  includeZeroBalances?: boolean      // default: false
+  comparativePeriodStart?: LocalDate // optional
+  comparativePeriodEnd?: LocalDate   // optional
+}
+
+function generateIncomeStatement(
+  input: GenerateIncomeStatementInput
+): Effect<IncomeStatementReport, CompanyNotFoundError | InvalidPeriodError>
+```
+
+**Returns**: `IncomeStatementReport` with all sections, subtotals, and net income
+
+**Errors**:
+- `CompanyNotFoundError`: Company does not exist
+- `InvalidPeriodError`: Period start date is after period end date
+
+## Income Statement Sections
+
+### Section Types
+
+Per ASC 220, expenses are grouped by function:
+
+```typescript
+type IncomeStatementSectionType =
+  | "Revenue"              // Operating and other revenue
+  | "CostOfSales"          // Direct costs (COGS)
+  | "OperatingExpenses"    // Expenses by function
+  | "OtherIncomeExpense"   // Non-operating items
+  | "IncomeTaxExpense"     // Income tax
+```
+
+### Account Category Mapping
+
+| Section | Account Categories |
+|---------|-------------------|
+| Revenue | `OperatingRevenue`, `OtherRevenue` |
+| Cost of Sales | `CostOfGoodsSold` |
+| Operating Expenses | `OperatingExpense`, `DepreciationAmortization` |
+| Other Income/Expense | `InterestExpense`, `OtherExpense` |
+| Income Tax | `TaxExpense` |
+
+## Comparative Analysis
+
+When comparative periods are provided, the report includes:
+
+### Variance Analysis
+
+- **Absolute Variance**: Current amount - Comparative amount
+- **Percentage Variance**: (Variance / Comparative amount) × 100
+
+### Key Metrics
+
+```typescript
+// Gross profit margin
+grossProfit / revenue * 100
+
+// Operating margin
+operatingIncome / revenue * 100
+
+// Net profit margin
+netIncome / revenue * 100
+```
+
+## UI Workflow
+
+<Tabs>
+  <Tab title="Single Period">
+    1. Navigate to **Reports** → **Income Statement**
+    2. Select the company
+    3. Choose **Period Start Date** (e.g., January 1, 2024)
+    4. Choose **Period End Date** (e.g., December 31, 2024)
+    5. Click **Generate Report**
+    6. Review financial performance:
+       - Revenue by source
+       - Cost of sales and gross profit
+       - Operating expenses by function
+       - Operating income
+       - Other income/expenses
+       - Net income
+    7. Analyze key margins (gross, operating, net)
+    8. Export to PDF or Excel
+  </Tab>
+  
+  <Tab title="Comparative Period">
+    1. Navigate to **Reports** → **Income Statement**
+    2. Select the company
+    3. Choose current period dates (e.g., Q4 2024)
+    4. Choose comparative period dates (e.g., Q4 2023)
+    5. Click **Generate Report**
+    6. Review period-over-period changes:
+       - Revenue growth/decline
+       - Margin changes (gross, operating, net)
+       - Expense trends
+       - Variance percentages
+    7. Identify significant variances for investigation
+    8. Export comparative report
+  </Tab>
+  
+  <Tab title="Monthly Reporting">
+    1. Navigate to **Reports** → **Income Statement**
+    2. Select the company
+    3. Choose monthly period (e.g., November 1-30, 2024)
+    4. Enable comparative period (prior month)
+    5. Click **Generate Report**
+    6. Review monthly performance trends
+    7. Set up recurring report generation (optional)
+    8. Schedule email delivery to stakeholders
+  </Tab>
+</Tabs>
+
+## Report Features
+
+### Section Display Names
+
+The service provides formatted section names:
+
+```typescript
+getSectionDisplayName("Revenue")           // "Revenue"
+getSectionDisplayName("CostOfSales")       // "Cost of Sales"
+getSectionDisplayName("OperatingExpenses") // "Operating Expenses"
+getSectionDisplayName("OtherIncomeExpense")// "Other Income (Expense)"
+getSectionDisplayName("IncomeTaxExpense")  // "Income Tax Expense"
+```
+
+### Line Item Helpers
+
+```typescript
+// Check if account line (not subtotal)
+lineItem.isAccountLine
+
+// Check if total line
+lineItem.isTotalLine
+
+// Check if header line
+lineItem.isHeaderLine
+
+// Variance analysis
+lineItem.hasPositiveVariance  // Favorable for revenue, unfavorable for expense
+lineItem.hasNegativeVariance  // Unfavorable for revenue, favorable for expense
+```
+
+## Period-Based Calculation
+
+Unlike the balance sheet (point-in-time), the income statement calculates period activity:
+
+```typescript
+// Calculate revenue/expense for the period
+const periodBalance = calculatePeriodBalance(
+  accountId,
+  journalEntries,
+  periodStart,
+  periodEnd
+)
+```
+
+This includes only journal entries posted within the specified date range.
+
+## Export Formats
+
+Income statements support:
+
+- **PDF**: Professional formatted P&L with company header and period
+- **Excel**: Multi-sheet workbook with formulas, subtotals, and charts
+- **CSV**: Raw data export for custom analysis
+- **JSON**: Structured data for API integration
+
+## Best Practices
+
+1. **Consistent Periods**: Use standard periods (monthly, quarterly, annually) for trend analysis
+2. **Comparative Reporting**: Always compare to prior period or budget for context
+3. **Expense Classification**: Maintain proper account categories for accurate functional grouping
+4. **Margin Analysis**: Track gross, operating, and net margins over time
+5. **Variance Investigation**: Set thresholds for investigating significant variances
+
+## Common Issues
+
+| Issue | Cause | Resolution |
+|-------|-------|------------|
+| Invalid period error | Start date after end date | Verify date range is correct |
+| Missing revenue/expenses | Accounts not in correct category | Update account categories in chart of accounts |
+| Incorrect subtotals | Journal entries in wrong accounts | Review account mapping and reclassify if needed |
+| Zero net income | No activity in period | Verify journal entries are posted and dated correctly |
+
+<Info>
+Revenue accounts have credit normal balances, while expense accounts have debit normal balances. The service automatically handles these conventions for proper display.
+</Info>
+
+## Key Metrics Dashboard
+
+The income statement data can be used to calculate key performance indicators:
+
+- **Gross Profit Margin**: (Gross Profit / Revenue) × 100
+- **Operating Margin**: (Operating Income / Revenue) × 100
+- **EBITDA**: Operating Income + Depreciation + Amortization
+- **Net Profit Margin**: (Net Income / Revenue) × 100
+- **Revenue Growth**: (Current Revenue - Prior Revenue) / Prior Revenue × 100
+
+<Note>
+Per ASC 220, public companies must present expenses by function. Private companies may choose to present by nature, but functional presentation is recommended.
+</Note>

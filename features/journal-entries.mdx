@@ -1,0 +1,626 @@
+---
+title: Journal Entries
+description: Creating journal entries, debit/credit, and multi-currency lines
+---
+
+## Overview
+
+Journal entries are the foundation of double-entry bookkeeping. Each entry:
+
+- **Must balance**: Total debits = Total credits
+- **Contains multiple lines**: At least 2 lines (one debit, one credit)
+- **Posts to accounts**: Each line references an account from the chart of accounts
+- **Has a fiscal period**: Derived from transaction date and company fiscal year end
+
+<Info>
+Journal entries follow the **double-entry principle**: every debit must have a corresponding credit, ensuring the accounting equation (Assets = Liabilities + Equity) stays in balance.
+</Info>
+
+## Journal Entry Data Model
+
+### Header
+
+```typescript packages/core/src/journal/JournalEntry.ts
+export class JournalEntry extends Schema.Class<JournalEntry>("JournalEntry")({
+  id: JournalEntryId,
+  companyId: CompanyId,
+  entryNumber: Schema.OptionFromNullOr(EntryNumber),
+  referenceNumber: Schema.OptionFromNullOr(Schema.NonEmptyTrimmedString),
+  description: Schema.NonEmptyTrimmedString,
+  transactionDate: LocalDate,
+  postingDate: Schema.OptionFromNullOr(LocalDate),
+  documentDate: Schema.OptionFromNullOr(LocalDate),
+  fiscalPeriod: FiscalPeriodRef,
+  entryType: JournalEntryType,
+  sourceModule: SourceModule,
+  isMultiCurrency: Schema.Boolean,
+  status: JournalEntryStatus,
+  createdBy: UserId,
+  createdAt: Timestamp
+})
+```
+
+### Lines
+
+```typescript packages/core/src/journal/JournalEntryLine.ts
+export class JournalEntryLine extends Schema.Class<JournalEntryLine>("JournalEntryLine")({
+  id: JournalEntryLineId,
+  journalEntryId: JournalEntryId,
+  lineNumber: Schema.Number,
+  accountId: AccountId,
+  debitAmount: Schema.OptionFromNullOr(MonetaryAmount),
+  creditAmount: Schema.OptionFromNullOr(MonetaryAmount),
+  functionalCurrencyDebitAmount: Schema.OptionFromNullOr(MonetaryAmount),
+  functionalCurrencyCreditAmount: Schema.OptionFromNullOr(MonetaryAmount),
+  exchangeRate: Schema.BigDecimal,
+  memo: Schema.OptionFromNullOr(Schema.String),
+  dimensions: Schema.OptionFromNullOr(Dimensions),
+  intercompanyPartnerId: Schema.OptionFromNullOr(CompanyId)
+})
+```
+
+## Entry Types
+
+Journal entries are classified by type:
+
+```typescript packages/core/src/journal/JournalEntry.ts
+export const JournalEntryType = Schema.Literal(
+  "Standard",
+  "Adjusting",
+  "Closing",
+  "Opening",
+  "Reversing",
+  "Recurring",
+  "Intercompany",
+  "Revaluation",
+  "Elimination",
+  "System"
+)
+```
+
+<Tabs>
+  <Tab title="Standard">
+    Manual journal entries for day-to-day transactions
+    
+    **Use for**: General ledger adjustments, accruals, manual bookings
+  </Tab>
+  <Tab title="Adjusting">
+    Period-end adjustments (accruals, deferrals, corrections)
+    
+    **Use for**: Month-end/quarter-end/year-end adjusting entries
+  </Tab>
+  <Tab title="Closing">
+    Year-end closing entries
+    
+    **Use for**: Closing Revenue/Expense accounts to Retained Earnings
+  </Tab>
+  <Tab title="Opening">
+    Beginning balance entries for new fiscal year
+    
+    **Use for**: Initial balances when starting a new fiscal year
+  </Tab>
+  <Tab title="Reversing">
+    Reversal of prior entry for error correction
+    
+    **Use for**: Reversing incorrect entries (links to original via `reversedEntryId`)
+  </Tab>
+  <Tab title="Recurring">
+    Auto-generated recurring entries
+    
+    **Use for**: Monthly rent, depreciation, amortization
+  </Tab>
+  <Tab title="Intercompany">
+    Transactions between related companies
+    
+    **Use for**: Intercompany sales, loans, allocations
+  </Tab>
+  <Tab title="Revaluation">
+    Currency revaluation entries
+    
+    **Use for**: Revaluing foreign currency accounts at period end
+  </Tab>
+  <Tab title="Elimination">
+    Consolidation elimination entries
+    
+    **Use for**: Eliminating intercompany transactions during consolidation
+  </Tab>
+  <Tab title="System">
+    System-generated entries from sub-modules
+    
+    **Use for**: Entries created automatically by AP, AR, Inventory modules
+  </Tab>
+</Tabs>
+
+## Entry Status Workflow
+
+Journal entries follow a status workflow:
+
+```typescript packages/core/src/journal/JournalEntry.ts
+export const JournalEntryStatus = Schema.Literal(
+  "Draft",
+  "PendingApproval",
+  "Approved",
+  "Posted",
+  "Reversed"
+)
+```
+
+<Steps>
+  <Step title="Draft">
+    Initial creation, editable
+    
+    - Can be edited or deleted
+    - No entry number assigned
+    - Not reflected in account balances
+  </Step>
+  <Step title="Pending Approval">
+    Awaiting authorization
+    
+    - Cannot be edited
+    - Requires approval from authorized user
+    - Can be rejected back to Draft
+  </Step>
+  <Step title="Approved">
+    Authorized but not yet posted
+    
+    - Cannot be edited
+    - Ready to post to general ledger
+  </Step>
+  <Step title="Posted">
+    Recorded in general ledger
+    
+    - Entry number assigned
+    - Affects account balances
+    - Cannot be edited or deleted (must reverse)
+    - Posting date recorded
+  </Step>
+  <Step title="Reversed">
+    Entry has been reversed
+    
+    - Original entry remains for audit trail
+    - Linked to reversing entry via `reversingEntryId`
+  </Step>
+</Steps>
+
+## Creating Journal Entries
+
+### UI Workflow
+
+The journal entry form provides a multi-line editor:
+
+<Tabs>
+  <Tab title="Header Fields">
+    - **Date**: Transaction date (validated against open periods)
+    - **Reference**: Optional external reference number
+    - **Description**: Required description/narrative
+    - **Type**: Entry type dropdown (Standard, Adjusting, etc.)
+    - **Fiscal Period**: Auto-computed from date (read-only)
+  </Tab>
+  <Tab title="Line Items">
+    Each line includes:
+    - **Account**: Searchable account dropdown
+    - **Memo**: Optional line-level memo
+    - **Debit**: Debit amount (either debit OR credit, not both)
+    - **Credit**: Credit amount (either credit OR debit, not both)
+    
+    **Add Line** button to add more lines (minimum 2 required)
+  </Tab>
+  <Tab title="Multi-Currency">
+    Toggle "Foreign currency entry" to enable:
+    - **Currency**: Select transaction currency
+    - **Exchange Rate**: Conversion rate to functional currency
+    
+    All line amounts are entered in transaction currency and converted to functional currency
+  </Tab>
+</Tabs>
+
+### Balance Indicator
+
+The form displays real-time balance status:
+
+```tsx packages/web/src/components/forms/JournalEntryForm.tsx
+<BalanceIndicator
+  totalDebits={totalDebits}
+  totalCredits={totalCredits}
+  currency={currency}
+/>
+```
+
+<Tabs>
+  <Tab title="Balanced (Green)">
+    ✓ Total Debits = Total Credits
+    
+    Entry can be submitted for approval
+  </Tab>
+  <Tab title="Unbalanced (Red)">
+    ✗ Total Debits ≠ Total Credits
+    
+    Shows difference amount - entry must be corrected before submitting
+  </Tab>
+</Tabs>
+
+### Fiscal Period Computation
+
+Fiscal period is **automatically computed** from transaction date:
+
+```tsx packages/web/src/components/forms/JournalEntryForm.tsx
+function computeFiscalPeriod(
+  dateStr: string,
+  fiscalYearEnd: FiscalYearEnd
+): ComputedPeriod {
+  // Determines fiscal year based on fiscal year end
+  // Calculates period number (1-12) based on months from FY start
+  // Returns: { fiscalYear, periodNumber, periodName, periodDisplayName }
+}
+```
+
+**Example**: Company with March 31 fiscal year end
+- Transaction Date: April 15, 2025 → FY2026 Period 1
+- Transaction Date: March 20, 2026 → FY2026 Period 12
+
+<Info>
+The form shows the computed fiscal period next to the date field. Users cannot directly select the period - it's derived from the company's fiscal year end setting.
+</Info>
+
+### Period 13 (Adjustment Period)
+
+When the transaction date falls on or after the fiscal year end date, users can optionally post to **Period 13**:
+
+```tsx packages/web/src/components/forms/JournalEntryForm.tsx
+{canPostToAdjustmentPeriod && (
+  <label>
+    <input
+      type="checkbox"
+      checked={useAdjustmentPeriod}
+      onChange={(e) => setUseAdjustmentPeriod(e.target.checked)}
+    />
+    Post to adjustment period (P13)
+  </label>
+)}
+```
+
+<Warning>
+Period 13 is only available during year-end close. Use it for:
+- Year-end adjusting entries
+- Audit adjustments
+- Final accruals after month 12 close
+
+Do not use P13 for regular monthly entries.
+</Warning>
+
+### API Request
+
+```typescript
+const { data, error } = await api.POST('/api/v1/journal-entries', {
+  body: {
+    organizationId,
+    companyId,
+    description: "Rent expense for March 2025",
+    transactionDate: "2025-03-01",
+    documentDate: null,
+    fiscalPeriod: {
+      year: 2025,
+      period: 3
+    },
+    entryType: "Standard",
+    sourceModule: "GeneralLedger",
+    referenceNumber: "INV-2025-001",
+    lines: [
+      {
+        accountId: "rent-expense-account-id",
+        debitAmount: { amount: "5000.00", currency: "USD" },
+        creditAmount: null,
+        memo: "Monthly office rent",
+        dimensions: null,
+        intercompanyPartnerId: null
+      },
+      {
+        accountId: "cash-account-id",
+        debitAmount: null,
+        creditAmount: { amount: "5000.00", currency: "USD" },
+        memo: null,
+        dimensions: null,
+        intercompanyPartnerId: null
+      }
+    ]
+  }
+})
+```
+
+## Debit/Credit Rules
+
+<Warning>
+**Critical Validation**: Each line must have **exactly one** of debit or credit set - not both, not neither.
+</Warning>
+
+```typescript packages/core/src/journal/JournalEntryLine.ts
+const validateDebitCredit = (line: JournalEntryLine): boolean => {
+  const hasDebit = Option.isSome(line.debitAmount)
+  const hasCredit = Option.isSome(line.creditAmount)
+  
+  // ✓ Valid: One is set
+  if (hasDebit && !hasCredit) return true
+  if (!hasDebit && hasCredit) return true
+  
+  // ✗ Invalid: Both set or neither set
+  return false
+}
+```
+
+### Effect on Account Balances
+
+<AccordionGroup>
+  <Accordion title="Assets (Normal Debit Balance)">
+    - **Debit**: Increases asset balance
+    - **Credit**: Decreases asset balance
+    
+    Example: Cash account (Asset)
+    - Debit $1,000 → Cash increases by $1,000
+    - Credit $500 → Cash decreases by $500
+  </Accordion>
+
+  <Accordion title="Liabilities (Normal Credit Balance)">
+    - **Debit**: Decreases liability balance
+    - **Credit**: Increases liability balance
+    
+    Example: Accounts Payable (Liability)
+    - Credit $1,000 → AP increases by $1,000
+    - Debit $500 → AP decreases by $500
+  </Accordion>
+
+  <Accordion title="Equity (Normal Credit Balance)">
+    - **Debit**: Decreases equity balance
+    - **Credit**: Increases equity balance
+    
+    Example: Retained Earnings (Equity)
+    - Credit $10,000 → RE increases by $10,000
+    - Debit $2,000 → RE decreases by $2,000
+  </Accordion>
+
+  <Accordion title="Revenue (Normal Credit Balance)">
+    - **Debit**: Decreases revenue (contra-revenue)
+    - **Credit**: Increases revenue
+    
+    Example: Sales Revenue
+    - Credit $5,000 → Revenue increases by $5,000
+    - Debit $100 → Revenue decreases by $100 (sales return)
+  </Accordion>
+
+  <Accordion title="Expense (Normal Debit Balance)">
+    - **Debit**: Increases expense
+    - **Credit**: Decreases expense (reversal)
+    
+    Example: Rent Expense
+    - Debit $2,000 → Expense increases by $2,000
+    - Credit $200 → Expense decreases by $200 (correction)
+  </Accordion>
+</AccordionGroup>
+
+## Multi-Currency Entries
+
+When recording transactions in a **foreign currency**:
+
+<Steps>
+  <Step title="Enable Multi-Currency">
+    Toggle "Foreign currency entry" in the form
+  </Step>
+  <Step title="Select Currency">
+    Choose the transaction currency (e.g., EUR for a European vendor invoice)
+  </Step>
+  <Step title="Enter Exchange Rate">
+    Provide the exchange rate to convert to functional currency
+    
+    Example: 1 EUR = 1.10 USD
+  </Step>
+  <Step title="Enter Amounts">
+    All line amounts are entered in transaction currency (EUR)
+    
+    System automatically converts to functional currency (USD) using exchange rate
+  </Step>
+</Steps>
+
+### Multi-Currency Line Structure
+
+```typescript
+interface JournalEntryLine {
+  // Transaction currency amounts (what user enters)
+  debitAmount: Option<MonetaryAmount>      // { amount: "1000.00", currency: "EUR" }
+  creditAmount: Option<MonetaryAmount>
+  
+  // Functional currency amounts (auto-calculated)
+  functionalCurrencyDebitAmount: Option<MonetaryAmount>   // { amount: "1100.00", currency: "USD" }
+  functionalCurrencyCreditAmount: Option<MonetaryAmount>
+  
+  // Exchange rate used for conversion
+  exchangeRate: BigDecimal  // 1.10
+}
+```
+
+<Info>
+**Balance Validation**: When creating multi-currency entries, debits and credits must balance in the **transaction currency**. Functional currency amounts may have small rounding differences due to exchange rate precision.
+</Info>
+
+### Example: Recording EUR Invoice
+
+**Scenario**: US company (functional currency USD) receives EUR invoice
+
+```typescript
+const { data } = await api.POST('/api/v1/journal-entries', {
+  body: {
+    // ...
+    lines: [
+      {
+        accountId: "office-supplies-expense-id",
+        debitAmount: { amount: "1000.00", currency: "EUR" },
+        creditAmount: null,
+        memo: "Office supplies from German vendor"
+      },
+      {
+        accountId: "accounts-payable-id",
+        debitAmount: null,
+        creditAmount: { amount: "1000.00", currency: "EUR" },
+        memo: "Vendor: ABC GmbH"
+      }
+    ]
+  }
+})
+```
+
+**Result**:
+- Transaction amounts: 1,000 EUR debit, 1,000 EUR credit (balanced)
+- Functional amounts: 1,100 USD debit, 1,100 USD credit (at rate 1.10)
+
+## Dimensions (Reporting Tags)
+
+Optional key-value pairs for reporting and analysis:
+
+```typescript packages/core/src/journal/JournalEntryLine.ts
+export const Dimensions = Schema.Record({
+  key: Schema.String,
+  value: Schema.String
+})
+```
+
+**Common Dimensions**:
+- `department`: "Sales", "Engineering", "Operations"
+- `project`: "Project-A", "Project-B"
+- `costCenter`: "CC-100", "CC-200"
+- `location`: "NYC", "SF", "London"
+
+```typescript
+const line: JournalEntryLine = {
+  // ...
+  dimensions: {
+    department: "Engineering",
+    project: "Product-Redesign",
+    costCenter: "CC-500"
+  }
+}
+```
+
+<Note>
+Dimensions allow slicing financial data by business unit, project, location, etc. without creating separate accounts for each combination. Use dimensions for flexible reporting and analytics.
+</Note>
+
+## Intercompany Entries
+
+For transactions between related companies:
+
+```typescript
+const line: JournalEntryLine = {
+  // ...
+  accountId: "intercompany-receivable-id",
+  debitAmount: { amount: "10000.00", currency: "USD" },
+  intercompanyPartnerId: "subsidiary-company-id",
+  matchingLineId: "matching-line-in-partner-books-id"
+}
+```
+
+<Steps>
+  <Step title="Create Entry in Company A">
+    Record intercompany receivable (debit) or payable (credit)
+    
+    Set `intercompanyPartnerId` to Company B's ID
+  </Step>
+  <Step title="Create Matching Entry in Company B">
+    Record corresponding payable (credit) or receivable (debit)
+    
+    Set `intercompanyPartnerId` to Company A's ID
+  </Step>
+  <Step title="Link Entries">
+    Set `matchingLineId` on both lines to reference each other
+    
+    Enables intercompany reconciliation and elimination tracking
+  </Step>
+</Steps>
+
+## Entry Reversal
+
+To reverse an incorrect entry:
+
+<Steps>
+  <Step title="Find Original Entry">
+    Locate the posted entry that needs reversal
+  </Step>
+  <Step title="Create Reversing Entry">
+    Create new entry with:
+    - `entryType`: "Reversing"
+    - `reversedEntryId`: ID of original entry
+    - Lines with **opposite** debits/credits
+  </Step>
+  <Step title="Post Reversal">
+    Post the reversing entry
+    
+    Original entry status changes to "Reversed"
+    
+    Original entry's `reversingEntryId` links to reversal
+  </Step>
+</Steps>
+
+```typescript
+// Original Entry (incorrect)
+lines: [
+  { accountId: "cash-id", debitAmount: "500.00" },
+  { accountId: "revenue-id", creditAmount: "500.00" }
+]
+
+// Reversing Entry
+lines: [
+  { accountId: "cash-id", creditAmount: "500.00" },    // Opposite
+  { accountId: "revenue-id", debitAmount: "500.00" }   // Opposite
+]
+```
+
+<Warning>
+Once posted, entries cannot be edited or deleted. Always use reversals for corrections to maintain audit trail.
+</Warning>
+
+## Best Practices
+
+<AccordionGroup>
+  <Accordion title="Descriptive Narratives">
+    Write clear, specific descriptions:
+    
+    ✓ **Good**: "March 2025 rent expense for NYC office - Check #1234"
+    
+    ✗ **Bad**: "Rent"
+    
+    Include:
+    - What the transaction is
+    - Time period (if applicable)
+    - Reference numbers (invoice, check, PO)
+  </Accordion>
+
+  <Accordion title="Line-Level Memos">
+    Use line memos for additional context:
+    - Vendor/customer name
+    - Invoice/reference number
+    - Specific allocation details
+    
+    Memos make entries easier to review and audit.
+  </Accordion>
+
+  <Accordion title="Entry Type Selection">
+    Use appropriate entry types:
+    - **Standard**: Regular day-to-day entries
+    - **Adjusting**: Month/quarter/year-end adjustments only
+    - **Closing**: Year-end close entries only
+    
+    Proper classification enables filtering and reporting by entry type.
+  </Accordion>
+
+  <Accordion title="Multi-Currency Exchange Rates">
+    Use appropriate exchange rates:
+    - **Spot rate**: Current market rate at transaction date
+    - **Average rate**: Monthly/quarterly average (for income statement items)
+    - **Historical rate**: Original transaction rate (for balance sheet items)
+    
+    Document the source and date of exchange rates used.
+  </Accordion>
+</AccordionGroup>
+
+## Related Pages
+
+- [Chart of Accounts](/features/chart-of-accounts) - Accounts referenced by journal entry lines
+- [Fiscal Periods](/features/fiscal-periods) - Period assignment and validation
+- [Multi-Currency](/features/multi-currency) - Foreign currency transactions and translation

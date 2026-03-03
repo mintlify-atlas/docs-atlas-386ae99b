@@ -1,80 +1,485 @@
 ---
-title: "Quickstart"
-description: "Start building awesome documentation in minutes"
+title: Quickstart
+description: Get started with Accountability - from signup to your first journal entry
 ---
 
-## Get started in three steps
+# Quickstart Guide
 
-Get your documentation site running locally and make your first customization.
+This guide will walk you through creating your first organization, company, and journal entry in Accountability.
 
-### Step 1: Set up your local environment
+## Prerequisites
 
-<AccordionGroup>
-  <Accordion icon="copy" title="Clone your docs locally">
-    During the onboarding process, you created a GitHub repository with your docs content if you didn't already have one. You can find a link to this repository in your [dashboard](https://dashboard.mintlify.com).
+- Modern web browser (Chrome, Firefox, Safari, or Edge)
+- Email address for account registration
+
+## Create Your Account
+
+<Steps>
+  <Step title="Register">
+    Navigate to the registration page and create your account:
+
+    1. Enter your email address
+    2. Choose a display name
+    3. Create a strong password (minimum 8 characters with uppercase, lowercase, and number)
+    4. Click **Create Account**
+
+    <Note>
+      Accountability supports multiple authentication methods:
+      - Local authentication (email/password)
+      - Google OAuth
+      - WorkOS SSO (for enterprise)
+    </Note>
+  </Step>
+
+  <Step title="Sign In">
+    After registration, sign in with your credentials.
+
+    You'll be automatically redirected to create your first organization.
+  </Step>
+</Steps>
+
+## Create Your Organization
+
+An **Organization** is the top-level container that holds all your companies.
+
+<Steps>
+  <Step title="Enter Organization Details">
+    On the **Create Organization** page:
+
+    1. **Name**: Enter your organization name (e.g., "Acme Holdings Inc")
+    2. **Reporting Currency**: Select the currency for consolidated reports (typically your home country currency)
+       - USD - United States Dollar
+       - EUR - Euro
+       - GBP - British Pound Sterling
+       - And many more...
+
+    <CodeGroup>
+    ```json Example Organization
+    {
+      "name": "Acme Holdings Inc",
+      "reportingCurrency": "USD"
+    }
+    ```
+    </CodeGroup>
+  </Step>
+
+  <Step title="Configure Settings (Optional)">
+    Expand **Advanced Settings** to customize:
+
+    - **Default Locale**: en-US, en-GB, etc.
+    - **Default Timezone**: UTC, America/New_York, etc.
+    - **Default Decimal Places**: 0-4 (default: 2)
+
+    <Note>
+      You can change these settings later in Organization Settings.
+    </Note>
+  </Step>
+
+  <Step title="Create Organization">
+    Click **Create Organization**.
+
+    You'll be redirected to the organization dashboard.
+  </Step>
+</Steps>
+
+## Create Your First Company
+
+A **Company** represents a legal entity with its own chart of accounts and financial records.
+
+<Steps>
+  <Step title="Navigate to Companies">
+    From the organization dashboard:
     
-    To clone the repository locally so that you can make and preview changes to your docs, follow the [Cloning a repository](https://docs.github.com/en/repositories/creating-and-managing-repositories/cloning-a-repository) guide in the GitHub docs.
-  </Accordion>
-  <Accordion icon="rectangle-terminal" title="Start the preview server">
-    1. Install the Mintlify CLI: `npm i -g mint`
-    2. Navigate to your docs directory and run: `mint dev`
-    3. Open `http://localhost:3000` to see your docs live!
+    1. Click **Companies** in the sidebar
+    2. Click **New Company** button
+  </Step>
+
+  <Step title="Enter Company Information">
+    Fill in the company details:
+
+    **Basic Information**
+    - **Name**: Company name for display (e.g., "Acme Corporation")
+    - **Legal Name**: Official registered name
+    - **Jurisdiction**: Country of incorporation (US, GB, etc.)
+
+    **Currency Settings**
+    - **Functional Currency**: The currency of the company's primary economic environment (ASC 830)
+      - For a US company: USD
+      - For a UK company: GBP
+      - For a company primarily operating in Europe: EUR
+
+    <Note>
+      **Functional Currency** is the currency in which the company primarily generates and expends cash. This is different from **Reporting Currency** which is used for consolidated reports.
+    </Note>
+
+    **Fiscal Year**
+    - **Fiscal Year End**: Select month and day (e.g., December 31)
+    - The system automatically calculates fiscal periods based on this date
+
+    <CodeGroup>
+    ```json Example Company
+    {
+      "name": "Acme Corporation",
+      "legalName": "Acme Corporation Ltd.",
+      "jurisdiction": "US",
+      "functionalCurrency": "USD",
+      "fiscalYearEnd": {
+        "month": 12,
+        "day": 31
+      }
+    }
+    ```
+    </CodeGroup>
+  </Step>
+
+  <Step title="Create Company">
+    Click **Create Company**.
+
+    The system automatically:
+    - Creates the company
+    - Generates fiscal periods for the current fiscal year
+    - Sets up a basic chart of accounts structure
+  </Step>
+</Steps>
+
+## Set Up Chart of Accounts
+
+The **Chart of Accounts** defines the accounts you'll use to record transactions.
+
+<Steps>
+  <Step title="Navigate to Accounts">
+    From the company detail page:
     
-    <Tip>Your preview updates automatically as you edit files.</Tip>
-  </Accordion>
-</AccordionGroup>
+    1. Click **Accounts** in the submenu
+    2. Review the default accounts created automatically
+  </Step>
 
-### Step 2: Deploy your changes
+  <Step title="Add Custom Accounts">
+    Click **New Account** to add accounts specific to your business:
 
-<AccordionGroup>
-  <Accordion icon="github" title="Install our GitHub app">
-    Install the Mintlify GitHub app from your [dashboard](https://dashboard.mintlify.com/settings/organization/github-app).
+    **Example: Adding a Bank Account**
+    - **Account Number**: 1010 (Cash and Cash Equivalents range)
+    - **Name**: "Chase Business Checking"
+    - **Account Type**: Asset
+    - **Account Category**: Current Asset
+    - **Normal Balance**: Debit
+    - **Is Postable**: ✓ (allows direct posting)
+    - **Currency**: USD (or leave blank for any currency)
+
+    <CodeGroup>
+    ```json Bank Account Example
+    {
+      "accountNumber": "1010",
+      "name": "Chase Business Checking",
+      "accountType": "Asset",
+      "accountCategory": "CurrentAsset",
+      "normalBalance": "Debit",
+      "isPostable": true
+    }
+    ```
+
+    ```json Revenue Account Example
+    {
+      "accountNumber": "4000",
+      "name": "Product Sales Revenue",
+      "accountType": "Revenue",
+      "accountCategory": "OperatingRevenue",
+      "normalBalance": "Credit",
+      "isPostable": true
+    }
+    ```
+
+    ```json Expense Account Example
+    {
+      "accountNumber": "6100",
+      "name": "Salaries and Wages",
+      "accountType": "Expense",
+      "accountCategory": "OperatingExpense",
+      "normalBalance": "Debit",
+      "isPostable": true
+    }
+    ```
+    </CodeGroup>
+
+    <Note>
+      **Account Number Ranges** follow US GAAP convention:
+      - 1000-1499: Current Assets
+      - 1500-1999: Non-Current Assets
+      - 2000-2499: Current Liabilities
+      - 2500-2999: Non-Current Liabilities
+      - 3000-3999: Equity
+      - 4000-4999: Revenue
+      - 5000-5999: Cost of Sales
+      - 6000-7999: Operating Expenses
+      - 8000-8999: Other Income/Expense
+    </Note>
+  </Step>
+</Steps>
+
+## Create Your First Journal Entry
+
+A **Journal Entry** records financial transactions using double-entry bookkeeping.
+
+<Steps>
+  <Step title="Navigate to Journal Entries">
+    From the company detail page:
     
-    Our GitHub app automatically deploys your changes to your docs site, so you don't need to manage deployments yourself.
-</Accordion>
-<Accordion icon="palette" title="Update your site name and colors">
-    For a first change, let's update the name and colors of your docs site.
+    1. Click **Journal Entries** in the submenu
+    2. Click **New Entry** button
+  </Step>
 
-    1. Open `docs.json` in your editor.
-    2. Change the `"name"` field to your project name.
-    3. Update the `"colors"` to match your brand.
-    4. Save and see your changes instantly at `http://localhost:3000`.
+  <Step title="Enter Header Information">
+    Fill in the journal entry header:
 
-    <Tip>Try changing the primary color to see an immediate difference!</Tip>
-  </Accordion>
-</AccordionGroup>
+    - **Transaction Date**: Date when the economic event occurred
+    - **Description**: Brief explanation of the transaction
+    - **Reference**: Optional external reference number
 
-### Step 3: Go live
+    <Warning>
+      **Fiscal Period** is automatically calculated based on the transaction date and your company's fiscal year end. You cannot manually select it.
+    </Warning>
+  </Step>
 
-<Accordion icon="rocket" title="Publish your docs">
-  1. Commit and push your changes.
-  2. Your docs will update and be live in moments!
-</Accordion>
+  <Step title="Add Entry Lines">
+    Add debit and credit lines to record the transaction:
 
-## Next steps
+    **Example: Recording Initial Capital Investment**
 
-Now that you have your docs running, explore these key features:
+    | Line | Account | Description | Debit | Credit |
+    |------|---------|-------------|-------|--------|
+    | 1 | 1010 - Chase Business Checking | Initial capital | $10,000.00 | - |
+    | 2 | 3000 - Share Capital | Initial capital | - | $10,000.00 |
+
+    Click **Add Line** for each entry line:
+    1. Select the account from the dropdown
+    2. Enter line description (optional)
+    3. Enter debit OR credit amount
+    4. Select currency (defaults to company's functional currency)
+
+    <Note>
+      The system validates in real-time that **Total Debits = Total Credits**. The entry cannot be submitted until balanced.
+    </Note>
+
+    <CodeGroup>
+    ```json Journal Entry Example
+    {
+      "transactionDate": "2026-03-03",
+      "description": "Initial capital investment",
+      "reference": "CAP-001",
+      "lines": [
+        {
+          "accountId": "1010",
+          "description": "Initial capital - checking account",
+          "debit": 10000.00,
+          "credit": 0,
+          "currency": "USD"
+        },
+        {
+          "accountId": "3000",
+          "description": "Initial capital - share capital",
+          "debit": 0,
+          "credit": 10000.00,
+          "currency": "USD"
+        }
+      ]
+    }
+    ```
+    </CodeGroup>
+  </Step>
+
+  <Step title="Submit Entry">
+    Once balanced:
+
+    - Click **Save as Draft** to save without posting (editable)
+    - Click **Submit for Approval** to post immediately (if you have permission)
+
+    <Note>
+      Posted entries are **immutable**. To correct a posted entry, you must create a reversing entry.
+    </Note>
+  </Step>
+
+  <Step title="Verify Entry">
+    After posting:
+    
+    1. View the entry detail page
+    2. Verify the fiscal period assignment
+    3. Note the sequential entry number assigned
+    4. Check the audit trail (created by, posted by, timestamps)
+  </Step>
+</Steps>
+
+## View Financial Reports
+
+Now that you have transactions, generate your first financial reports.
+
+<Steps>
+  <Step title="Navigate to Reports">
+    From the company detail page:
+    
+    Click **Reports** in the submenu
+  </Step>
+
+  <Step title="Trial Balance">
+    Start with the **Trial Balance** to verify your accounts:
+
+    - Shows all accounts with debit/credit balances
+    - Confirms total debits = total credits
+    - Foundation for all other financial statements
+
+    Click **Trial Balance** to view.
+  </Step>
+
+  <Step title="Balance Sheet">
+    View your **Balance Sheet** (Statement of Financial Position):
+
+    - **Assets** = **Liabilities** + **Equity**
+    - Shows current vs non-current classification
+    - Real-time calculation from journal entries
+
+    Select a date and click **Balance Sheet**.
+  </Step>
+
+  <Step title="Income Statement">
+    Generate an **Income Statement** (Profit & Loss):
+
+    - Revenue - Expenses = Net Income
+    - Select start and end date for the period
+    - Shows operating vs non-operating income
+
+    Select date range and click **Income Statement**.
+  </Step>
+</Steps>
+
+## Multi-Currency Transactions (Optional)
+
+If your company transacts in multiple currencies:
+
+<Steps>
+  <Step title="Add Exchange Rates">
+    Navigate to **Exchange Rates** in the organization menu:
+
+    1. Click **New Exchange Rate**
+    2. Select **From Currency** and **To Currency**
+    3. Enter the exchange rate
+    4. Select rate type (Spot, Average, Historical, Closing)
+    5. Set effective date
+
+    <CodeGroup>
+    ```json Exchange Rate Example
+    {
+      "fromCurrency": "EUR",
+      "toCurrency": "USD",
+      "rate": 1.0850,
+      "rateType": "Spot",
+      "effectiveDate": "2026-03-03"
+    }
+    ```
+    </CodeGroup>
+  </Step>
+
+  <Step title="Create Multi-Currency Entry">
+    When creating a journal entry:
+
+    1. Select different currencies for different lines
+    2. The system validates balance in functional currency
+    3. Automatic foreign exchange gain/loss calculation
+  </Step>
+</Steps>
+
+## Next Steps
 
 <CardGroup cols={2}>
-
-<Card title="Write Content" icon="pen-to-square" href="/essentials/markdown">
-  Learn MDX syntax and start writing your documentation.
-</Card>
-
-<Card title="Customize style" icon="palette" href="/essentials/settings">
-  Make your docs match your brand perfectly.
-</Card>
-
-<Card title="Add code examples" icon="square-code" href="/essentials/code">
-  Include syntax-highlighted code blocks.
-</Card>
-
-<Card title="API documentation" icon="code" href="/api-reference/introduction">
-  Auto-generate API docs from OpenAPI specs.
-</Card>
-
+  <Card title="Add More Companies" icon="building">
+    Create additional companies for different legal entities within your organization
+  </Card>
+  
+  <Card title="Set Up Consolidation" icon="layers">
+    Define parent-subsidiary relationships for consolidated financial reporting
+  </Card>
+  
+  <Card title="Manage Team Access" icon="users">
+    Invite team members and configure role-based permissions
+  </Card>
+  
+  <Card title="Automate with API" icon="code">
+    Integrate with your systems using the OpenAPI-documented REST API
+  </Card>
 </CardGroup>
 
+## Common Workflows
+
+### Recording a Sale
+
+```json Sale Transaction
+{
+  "description": "Sale to Customer ABC",
+  "lines": [
+    {
+      "account": "1200 - Accounts Receivable",
+      "debit": 1200.00
+    },
+    {
+      "account": "4000 - Product Sales Revenue",
+      "credit": 1000.00
+    },
+    {
+      "account": "2100 - Sales Tax Payable",
+      "credit": 200.00
+    }
+  ]
+}
+```
+
+### Recording a Payment
+
+```json Payment Transaction
+{
+  "description": "Payment received from Customer ABC",
+  "lines": [
+    {
+      "account": "1010 - Chase Business Checking",
+      "debit": 1200.00
+    },
+    {
+      "account": "1200 - Accounts Receivable",
+      "credit": 1200.00
+    }
+  ]
+}
+```
+
+### Recording an Expense
+
+```json Expense Transaction
+{
+  "description": "Monthly office rent",
+  "lines": [
+    {
+      "account": "6200 - Rent Expense",
+      "debit": 2500.00
+    },
+    {
+      "account": "1010 - Chase Business Checking",
+      "credit": 2500.00
+    }
+  ]
+}
+```
+
+## Need Help?
+
 <Note>
-  **Need help?** See our [full documentation](https://mintlify.com/docs) or join our [community](https://mintlify.com/community).
+  All financial data is validated in real-time. If you encounter validation errors, check:
+  - Debits equal credits
+  - All required fields are filled
+  - Transaction date falls within an open fiscal period
+  - Selected accounts are postable (not summary accounts)
 </Note>
+
+<Warning>
+  **Posted entries are immutable**. To correct a mistake:
+  1. Create a reversing entry (reverses the incorrect entry)
+  2. Create a new correct entry
+  
+  This maintains a complete audit trail.
+</Warning>

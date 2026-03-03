@@ -1,0 +1,962 @@
+---
+title: Frontend Architecture
+description: React patterns, UI components, and frontend development guidelines
+---
+
+## Overview
+
+The frontend (`packages/web`) is built with **React 19** and **TanStack Start** for server-side rendering. The architecture emphasizes **simplicity, type safety, and performance**.
+
+<Warning>
+  **No Effect code in frontend**. The frontend uses standard React patterns with `useState`, `useEffect`, and hooks. Effect is backend-only.
+</Warning>
+
+## Technology Stack
+
+- **React 19**: UI library with server components
+- **TanStack Start**: Full-stack framework with SSR
+- **openapi-fetch**: Type-safe API client
+- **Tailwind CSS**: Utility-first styling
+- **Lucide React**: Icon library
+
+## Architecture Layers
+
+```
+Routes (file-based)
+  │
+  ├── Loaders (SSR data fetching)
+  │
+  ├── Page Components
+  │     │
+  │     ├── Layout Components (AppLayout, Sidebar, Header)
+  │     │
+  │     ├── Feature Components (CompanyList, JournalEntryForm)
+  │     │
+  │     └── UI Components (Button, Input, Table)
+  │
+  └── API Client (openapi-fetch)
+        │
+        └── Backend API (Effect HttpApi)
+```
+
+## State Management
+
+### Server State: Use Loaders
+
+**All server data fetching happens in loaders, not in components.**
+
+```tsx
+// routes/organizations/$organizationId/companies/index.tsx
+import { createFileRoute } from "@tanstack/react-start"
+import { api } from "@/api/client"
+
+export const Route = createFileRoute(
+  "/organizations/$organizationId/companies/"
+)({
+  loader: async ({ request, params }) => {
+    // Forward cookie for authenticated endpoints
+    const cookie = request.headers.get("cookie")
+    
+    const { data, error } = await api.GET("/api/v1/companies", {
+      params: {
+        query: { organizationId: params.organizationId }
+      },
+      headers: cookie ? { cookie } : undefined
+    })
+    
+    if (error) {
+      throw new Error("Failed to load companies")
+    }
+    
+    return { companies: data ?? [] }
+  },
+  component: CompaniesPage
+})
+
+function CompaniesPage() {
+  // Data is immediately available from SSR
+  const { companies } = Route.useLoaderData()
+  
+  return (
+    <div>
+      <h1>Companies</h1>
+      {companies.length === 0 ? (
+        <EmptyState />
+      ) : (
+        <CompanyList companies={companies} />
+      )}
+    </div>
+  )
+}
+```
+
+### Local State: Use useState
+
+**For UI-only state (forms, modals, toggles), use standard React hooks.**
+
+```tsx
+function CreateCompanyForm() {
+  const [name, setName] = useState("")
+  const [currency, setCurrency] = useState("USD")
+  const [isSubmitting, setIsSubmitting] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setIsSubmitting(true)
+    setError(null)
+    
+    const { data, error: apiError } = await api.POST("/api/v1/companies", {
+      body: { name, functionalCurrency: currency }
+    })
+    
+    if (apiError) {
+      setError(apiError.body?.message ?? "Failed to create company")
+      setIsSubmitting(false)
+      return
+    }
+    
+    // Success - refetch and navigate
+    await router.invalidate()
+    router.navigate({ to: `/companies/${data.id}` })
+  }
+  
+  return (
+    <form onSubmit={handleSubmit}>
+      <Input
+        label="Company Name"
+        value={name}
+        onChange={(e) => setName(e.target.value)}
+      />
+      <Select
+        label="Currency"
+        value={currency}
+        onChange={(e) => setCurrency(e.target.value)}
+      >
+        <option value="USD">USD</option>
+        <option value="EUR">EUR</option>
+        <option value="GBP">GBP</option>
+      </Select>
+      
+      {error && <ErrorMessage>{error}</ErrorMessage>}
+      
+      <Button type="submit" disabled={isSubmitting}>
+        {isSubmitting ? "Creating..." : "Create Company"}
+      </Button>
+    </form>
+  )
+}
+```
+
+### URL State: Search Params
+
+**For shareable state (filters, pagination, sort), use URL search params.**
+
+```tsx
+import { z } from "zod"
+
+const searchSchema = z.object({
+  page: z.number().optional().default(1),
+  status: z.enum(["Draft", "Posted", "Void"]).optional(),
+  search: z.string().optional()
+})
+
+export const Route = createFileRoute("/journal-entries/")({
+  validateSearch: searchSchema,
+  
+  loader: async ({ deps: { page, status, search } }) => {
+    const { data } = await api.GET("/api/v1/journal-entries", {
+      params: {
+        query: { page, limit: 20, status, search }
+      }
+    })
+    return { entries: data ?? [], page, status, search }
+  },
+  
+  component: JournalEntriesPage
+})
+
+function JournalEntriesPage() {
+  const { entries, page, status, search } = Route.useLoaderData()
+  const navigate = useNavigate()
+  
+  const handleFilterChange = (newStatus: string | undefined) => {
+    navigate({
+      search: { page: 1, status: newStatus, search }
+    })
+  }
+  
+  return (
+    <div>
+      <FilterBar
+        status={status}
+        onStatusChange={handleFilterChange}
+      />
+      <EntryList entries={entries} />
+      <Pagination currentPage={page} />
+    </div>
+  )
+}
+```
+
+## Component Patterns
+
+### Presentational vs. Container Components
+
+**Presentational** components receive props, no API calls:
+
+```tsx
+interface CompanyCardProps {
+  readonly company: Company
+  readonly onEdit: () => void
+  readonly onDelete: () => void
+}
+
+function CompanyCard({ company, onEdit, onDelete }: CompanyCardProps) {
+  return (
+    <div className="rounded-lg border p-4">
+      <h3 className="text-lg font-semibold">{company.name}</h3>
+      <p className="text-sm text-gray-500">{company.functionalCurrency}</p>
+      <div className="mt-4 flex gap-2">
+        <Button onClick={onEdit}>Edit</Button>
+        <Button variant="danger" onClick={onDelete}>Delete</Button>
+      </div>
+    </div>
+  )
+}
+```
+
+**Container** components connect to data and handle logic:
+
+```tsx
+function CompaniesPage() {
+  const { companies } = Route.useLoaderData()
+  const router = useRouter()
+  const [deletingId, setDeletingId] = useState<string | null>(null)
+  
+  const handleEdit = (id: string) => {
+    router.navigate({ to: `/companies/${id}/edit` })
+  }
+  
+  const handleDelete = async (id: string) => {
+    if (!confirm("Are you sure?")) return
+    
+    setDeletingId(id)
+    const { error } = await api.DELETE("/api/v1/companies/{id}", {
+      params: { path: { id } }
+    })
+    
+    if (error) {
+      alert("Failed to delete company")
+      setDeletingId(null)
+      return
+    }
+    
+    await router.invalidate()
+  }
+  
+  return (
+    <div className="space-y-4">
+      {companies.map((company) => (
+        <CompanyCard
+          key={company.id}
+          company={company}
+          onEdit={() => handleEdit(company.id)}
+          onDelete={() => handleDelete(company.id)}
+        />
+      ))}
+    </div>
+  )
+}
+```
+
+### Composition Over Props
+
+```tsx
+// GOOD: Composition
+<Card>
+  <CardHeader>
+    <h2 className="text-xl font-bold">Account Details</h2>
+    <Badge>Active</Badge>
+  </CardHeader>
+  <CardBody>
+    <div className="space-y-2">
+      <Field label="Account Number" value={account.accountNumber} />
+      <Field label="Name" value={account.name} />
+    </div>
+  </CardBody>
+  <CardFooter>
+    <Button>Edit</Button>
+    <Button variant="danger">Delete</Button>
+  </CardFooter>
+</Card>
+
+// BAD: Prop drilling
+<Card
+  title="Account Details"
+  badge="Active"
+  fields={[
+    { label: "Account Number", value: account.accountNumber },
+    { label: "Name", value: account.name }
+  ]}
+  actions={[
+    { label: "Edit", onClick: handleEdit },
+    { label: "Delete", onClick: handleDelete, variant: "danger" }
+  ]}
+/>
+```
+
+## Styling with Tailwind
+
+### Basic Usage
+
+```tsx
+function Button({ children, variant = "primary", ...props }: ButtonProps) {
+  return (
+    <button
+      className={clsx(
+        // Base styles
+        "px-4 py-2 rounded-md font-medium transition-colors",
+        "focus:outline-none focus:ring-2 focus:ring-offset-2",
+        
+        // Variants
+        variant === "primary" && "bg-blue-600 text-white hover:bg-blue-700",
+        variant === "secondary" && "bg-gray-200 text-gray-800 hover:bg-gray-300",
+        variant === "danger" && "bg-red-600 text-white hover:bg-red-700",
+        
+        // Disabled
+        props.disabled && "opacity-50 cursor-not-allowed"
+      )}
+      {...props}
+    >
+      {children}
+    </button>
+  )
+}
+```
+
+### Responsive Design
+
+```tsx
+function Dashboard() {
+  return (
+    <div className="
+      grid gap-4
+      grid-cols-1
+      md:grid-cols-2
+      lg:grid-cols-3
+      xl:grid-cols-4
+    ">
+      <MetricCard title="Revenue" value="$1.2M" />
+      <MetricCard title="Expenses" value="$800K" />
+      <MetricCard title="Profit" value="$400K" />
+      <MetricCard title="Margin" value="33%" />
+    </div>
+  )
+}
+```
+
+### Dark Mode (Future)
+
+```tsx
+function Card({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="
+      rounded-lg border p-4
+      bg-white dark:bg-gray-800
+      border-gray-200 dark:border-gray-700
+      text-gray-900 dark:text-gray-100
+    ">
+      {children}
+    </div>
+  )
+}
+```
+
+## Layout Components
+
+### AppLayout
+
+**All authenticated pages use AppLayout** with sidebar + header:
+
+```tsx
+// components/layout/AppLayout.tsx
+export function AppLayout({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="flex h-screen overflow-hidden">
+      <Sidebar />
+      <div className="flex flex-1 flex-col overflow-hidden">
+        <Header />
+        <main className="flex-1 overflow-y-auto p-6">
+          {children}
+        </main>
+      </div>
+    </div>
+  )
+}
+```
+
+### Sidebar
+
+```tsx
+export function Sidebar() {
+  const { organizationId } = useParams()
+  
+  return (
+    <aside className="w-64 border-r bg-gray-50 flex flex-col">
+      <div className="p-4">
+        <Logo />
+      </div>
+      
+      <nav className="flex-1 overflow-y-auto p-4">
+        <SidebarLink to="/" icon={Home}>Dashboard</SidebarLink>
+        <SidebarLink to="/companies" icon={Building}>Companies</SidebarLink>
+        <SidebarLink to="/consolidation" icon={Layers}>Consolidation</SidebarLink>
+        <SidebarLink to="/reports" icon={FileText}>Reports</SidebarLink>
+      </nav>
+      
+      <div className="p-4 border-t">
+        <OrganizationSelector currentOrgId={organizationId} />
+      </div>
+    </aside>
+  )
+}
+```
+
+### Header
+
+```tsx
+export function Header() {
+  const user = useContext(UserContext)
+  
+  return (
+    <header className="border-b bg-white px-6 py-4 flex items-center justify-between">
+      <Breadcrumbs />
+      
+      <div className="flex items-center gap-4">
+        <NotificationButton />
+        <UserMenu user={user} />
+      </div>
+    </header>
+  )
+}
+```
+
+### Breadcrumbs
+
+```tsx
+interface BreadcrumbItem {
+  label: string
+  href?: string
+}
+
+interface BreadcrumbsProps {
+  items: BreadcrumbItem[]
+}
+
+export function Breadcrumbs({ items }: BreadcrumbsProps) {
+  return (
+    <nav className="flex items-center gap-2 text-sm">
+      {items.map((item, index) => (
+        <React.Fragment key={index}>
+          {index > 0 && <ChevronRight className="h-4 w-4 text-gray-400" />}
+          {item.href ? (
+            <Link
+              to={item.href}
+              className="text-gray-600 hover:text-gray-900"
+            >
+              {item.label}
+            </Link>
+          ) : (
+            <span className="text-gray-900 font-medium">{item.label}</span>
+          )}
+        </React.Fragment>
+      ))}
+    </nav>
+  )
+}
+
+// Usage
+<Breadcrumbs items={[
+  { label: "Organizations", href: "/organizations" },
+  { label: orgName, href: `/organizations/${orgId}` },
+  { label: "Companies" }
+]} />
+```
+
+## Page Templates
+
+### List Page
+
+```tsx
+function CompaniesPage() {
+  const { companies } = Route.useLoaderData()
+  const router = useRouter()
+  
+  return (
+    <div className="space-y-6">
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-bold">Companies</h1>
+          <p className="text-gray-500">Manage your legal entities</p>
+        </div>
+        {companies.length > 0 && (
+          <Button onClick={() => router.navigate({ to: "./new" })}>
+            <Plus className="h-4 w-4 mr-2" />
+            New Company
+          </Button>
+        )}
+      </div>
+      
+      {/* Content */}
+      {companies.length === 0 ? (
+        <EmptyState
+          icon={Building}
+          title="No companies yet"
+          description="Create your first company to get started."
+          action={
+            <Button onClick={() => router.navigate({ to: "./new" })}>
+              Create Company
+            </Button>
+          }
+        />
+      ) : (
+        <CompanyTable companies={companies} />
+      )}
+    </div>
+  )
+}
+```
+
+### Detail Page
+
+```tsx
+function CompanyDetailPage() {
+  const { company } = Route.useLoaderData()
+  const router = useRouter()
+  
+  return (
+    <div className="space-y-6">
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-bold">{company.name}</h1>
+          <Badge variant={company.isActive ? "success" : "gray"}>
+            {company.isActive ? "Active" : "Inactive"}
+          </Badge>
+        </div>
+        <div className="flex gap-2">
+          <Button onClick={() => router.navigate({ to: "./edit" })}>
+            Edit
+          </Button>
+          <Button variant="danger" onClick={handleDelete}>
+            Delete
+          </Button>
+        </div>
+      </div>
+      
+      {/* Info Card */}
+      <Card>
+        <CardHeader>
+          <h2 className="text-lg font-semibold">Company Information</h2>
+        </CardHeader>
+        <CardBody>
+          <div className="grid grid-cols-2 gap-4">
+            <Field label="Legal Name" value={company.legalName} />
+            <Field label="Currency" value={company.functionalCurrency} />
+            <Field label="Jurisdiction" value={company.jurisdiction} />
+            <Field label="Tax ID" value={company.taxId ?? "N/A"} />
+          </div>
+        </CardBody>
+      </Card>
+      
+      {/* Related Data */}
+      <Card>
+        <CardHeader>
+          <h2 className="text-lg font-semibold">Chart of Accounts</h2>
+        </CardHeader>
+        <CardBody>
+          <AccountList companyId={company.id} />
+        </CardBody>
+      </Card>
+    </div>
+  )
+}
+```
+
+### Form Page
+
+```tsx
+function CreateCompanyPage() {
+  const router = useRouter()
+  const [formData, setFormData] = useState({
+    name: "",
+    legalName: "",
+    functionalCurrency: "USD",
+    jurisdiction: "US"
+  })
+  const [isSubmitting, setIsSubmitting] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setIsSubmitting(true)
+    setError(null)
+    
+    const { data, error: apiError } = await api.POST("/api/v1/companies", {
+      body: formData
+    })
+    
+    if (apiError) {
+      setError(apiError.body?.message ?? "Failed to create company")
+      setIsSubmitting(false)
+      return
+    }
+    
+    await router.invalidate()
+    router.navigate({ to: `/companies/${data.id}` })
+  }
+  
+  return (
+    <div className="max-w-2xl mx-auto space-y-6">
+      <div>
+        <h1 className="text-2xl font-bold">Create Company</h1>
+        <p className="text-gray-500">Add a new legal entity</p>
+      </div>
+      
+      <Card>
+        <form onSubmit={handleSubmit}>
+          <CardBody className="space-y-4">
+            <Input
+              label="Company Name"
+              value={formData.name}
+              onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+              required
+            />
+            <Input
+              label="Legal Name"
+              value={formData.legalName}
+              onChange={(e) => setFormData({ ...formData, legalName: e.target.value })}
+              required
+            />
+            <Select
+              label="Functional Currency"
+              value={formData.functionalCurrency}
+              onChange={(e) => setFormData({ ...formData, functionalCurrency: e.target.value })}
+            >
+              <option value="USD">USD - US Dollar</option>
+              <option value="EUR">EUR - Euro</option>
+              <option value="GBP">GBP - British Pound</option>
+            </Select>
+            
+            {error && <ErrorMessage>{error}</ErrorMessage>}
+          </CardBody>
+          
+          <CardFooter className="flex justify-end gap-2">
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={() => router.history.back()}
+            >
+              Cancel
+            </Button>
+            <Button type="submit" disabled={isSubmitting}>
+              {isSubmitting ? "Creating..." : "Create Company"}
+            </Button>
+          </CardFooter>
+        </form>
+      </Card>
+    </div>
+  )
+}
+```
+
+## UI Component Library
+
+### Button
+
+```tsx
+interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
+  variant?: "primary" | "secondary" | "danger" | "ghost"
+  size?: "sm" | "md" | "lg"
+}
+
+export function Button({
+  variant = "primary",
+  size = "md",
+  className,
+  children,
+  ...props
+}: ButtonProps) {
+  return (
+    <button
+      className={clsx(
+        "inline-flex items-center justify-center rounded-md font-medium",
+        "focus:outline-none focus:ring-2 focus:ring-offset-2",
+        "disabled:opacity-50 disabled:cursor-not-allowed",
+        "transition-colors",
+        
+        // Sizes
+        size === "sm" && "px-3 py-1.5 text-sm",
+        size === "md" && "px-4 py-2 text-base",
+        size === "lg" && "px-6 py-3 text-lg",
+        
+        // Variants
+        variant === "primary" && "bg-blue-600 text-white hover:bg-blue-700 focus:ring-blue-500",
+        variant === "secondary" && "bg-gray-200 text-gray-800 hover:bg-gray-300 focus:ring-gray-500",
+        variant === "danger" && "bg-red-600 text-white hover:bg-red-700 focus:ring-red-500",
+        variant === "ghost" && "text-gray-700 hover:bg-gray-100 focus:ring-gray-500",
+        
+        className
+      )}
+      {...props}
+    >
+      {children}
+    </button>
+  )
+}
+```
+
+### Input
+
+```tsx
+interface InputProps extends React.InputHTMLAttributes<HTMLInputElement> {
+  label: string
+  error?: string
+  helperText?: string
+}
+
+export function Input({ label, error, helperText, ...props }: InputProps) {
+  const id = useId()
+  
+  return (
+    <div>
+      <label htmlFor={id} className="block text-sm font-medium text-gray-700 mb-1">
+        {label}
+        {props.required && <span className="text-red-500 ml-1">*</span>}
+      </label>
+      <input
+        id={id}
+        className={clsx(
+          "w-full px-3 py-2 border rounded-md",
+          "focus:outline-none focus:ring-2 focus:ring-blue-500",
+          error
+            ? "border-red-300 focus:ring-red-500"
+            : "border-gray-300"
+        )}
+        {...props}
+      />
+      {helperText && !error && (
+        <p className="mt-1 text-sm text-gray-500">{helperText}</p>
+      )}
+      {error && (
+        <p className="mt-1 text-sm text-red-600">{error}</p>
+      )}
+    </div>
+  )
+}
+```
+
+### Table
+
+```tsx
+interface Column<T> {
+  header: string
+  accessor: (row: T) => React.ReactNode
+  width?: string
+}
+
+interface TableProps<T> {
+  data: readonly T[]
+  columns: Column<T>[]
+  onRowClick?: (row: T) => void
+}
+
+export function Table<T>({ data, columns, onRowClick }: TableProps<T>) {
+  return (
+    <div className="overflow-x-auto">
+      <table className="min-w-full divide-y divide-gray-200">
+        <thead className="bg-gray-50">
+          <tr>
+            {columns.map((column, index) => (
+              <th
+                key={index}
+                className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"
+                style={{ width: column.width }}
+              >
+                {column.header}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody className="bg-white divide-y divide-gray-200">
+          {data.map((row, rowIndex) => (
+            <tr
+              key={rowIndex}
+              onClick={() => onRowClick?.(row)}
+              className={clsx(
+                onRowClick && "cursor-pointer hover:bg-gray-50"
+              )}
+            >
+              {columns.map((column, colIndex) => (
+                <td key={colIndex} className="px-6 py-4 whitespace-nowrap text-sm">
+                  {column.accessor(row)}
+                </td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  )
+}
+
+// Usage
+<Table
+  data={companies}
+  columns={[
+    { header: "Name", accessor: (c) => c.name },
+    { header: "Currency", accessor: (c) => c.functionalCurrency },
+    { header: "Status", accessor: (c) => (
+      <Badge variant={c.isActive ? "success" : "gray"}>
+        {c.isActive ? "Active" : "Inactive"}
+      </Badge>
+    )}
+  ]}
+  onRowClick={(company) => router.navigate({ to: `/companies/${company.id}` })}
+/>
+```
+
+## Empty States
+
+```tsx
+interface EmptyStateProps {
+  icon: React.ComponentType<{ className?: string }>
+  title: string
+  description: string
+  action?: React.ReactNode
+}
+
+export function EmptyState({ icon: Icon, title, description, action }: EmptyStateProps) {
+  return (
+    <div className="flex flex-col items-center justify-center py-12">
+      <div className="rounded-full bg-gray-100 p-4 mb-4">
+        <Icon className="h-8 w-8 text-gray-400" />
+      </div>
+      <h3 className="text-lg font-medium text-gray-900 mb-2">{title}</h3>
+      <p className="text-gray-500 text-center max-w-sm mb-6">{description}</p>
+      {action}
+    </div>
+  )
+}
+```
+
+## Error Handling
+
+```tsx
+function CreateCompanyForm() {
+  const [error, setError] = useState<string | null>(null)
+  
+  const handleSubmit = async () => {
+    const { data, error: apiError } = await api.POST("/api/v1/companies", {
+      body: formData
+    })
+    
+    if (apiError) {
+      // Specific error messages
+      if (apiError.status === 422) {
+        setError("Please check your input and try again.")
+      } else if (apiError.status === 401) {
+        setError("Your session has expired. Please sign in again.")
+      } else {
+        setError("An error occurred. Please try again.")
+      }
+      return
+    }
+    
+    // Success
+  }
+  
+  return (
+    <form>
+      {/* ... */}
+      {error && (
+        <div className="rounded-md bg-red-50 border border-red-200 p-4">
+          <div className="flex">
+            <AlertCircle className="h-5 w-5 text-red-400" />
+            <div className="ml-3">
+              <h3 className="text-sm font-medium text-red-800">Error</h3>
+              <p className="text-sm text-red-700 mt-1">{error}</p>
+            </div>
+          </div>
+        </div>
+      )}
+    </form>
+  )
+}
+```
+
+## Performance Optimization
+
+### Code Splitting
+
+```tsx
+// Lazy load heavy components
+const ReportViewer = lazy(() => import("./components/ReportViewer"))
+
+function ReportsPage() {
+  return (
+    <Suspense fallback={<LoadingSpinner />}>
+      <ReportViewer />
+    </Suspense>
+  )
+}
+```
+
+### Memoization
+
+```tsx
+// Expensive computation
+const sortedAccounts = useMemo(
+  () => accounts.sort((a, b) => a.accountNumber.localeCompare(b.accountNumber)),
+  [accounts]
+)
+
+// Expensive component
+const MemoizedTable = memo(Table)
+```
+
+### Debouncing
+
+```tsx
+function SearchInput() {
+  const [search, setSearch] = useState("")
+  const debouncedSearch = useDebounce(search, 300)
+  
+  useEffect(() => {
+    if (debouncedSearch) {
+      // Trigger search
+    }
+  }, [debouncedSearch])
+  
+  return <Input value={search} onChange={(e) => setSearch(e.target.value)} />
+}
+
+function useDebounce<T>(value: T, delay: number): T {
+  const [debouncedValue, setDebouncedValue] = useState(value)
+  
+  useEffect(() => {
+    const handler = setTimeout(() => setDebouncedValue(value), delay)
+    return () => clearTimeout(handler)
+  }, [value, delay])
+  
+  return debouncedValue
+}
+```
+
+## Next Steps
+
+- [SSR and Routing](/architecture/ssr-and-routing) - TanStack Start patterns
+- [Testing](/architecture/testing) - E2E testing with Playwright
+- [Error Handling](/architecture/error-handling) - Frontend error patterns

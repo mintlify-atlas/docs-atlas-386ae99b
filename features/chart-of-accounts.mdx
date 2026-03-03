@@ -1,0 +1,542 @@
+---
+title: Chart of Accounts
+description: Account creation, US GAAP categories, and account hierarchy
+---
+
+## Overview
+
+The Chart of Accounts (COA) defines all accounts used for recording transactions within a company. Each account has:
+
+- **Account number** (4-digit numbering convention)
+- **Account type** (Asset, Liability, Equity, Revenue, Expense)
+- **Account category** (detailed classification within type)
+- **Normal balance** (Debit or Credit)
+- **Hierarchy** (optional parent-child relationships)
+
+<Info>
+Accounts are **company-specific**. Each company maintains its own chart of accounts, allowing different account structures across legal entities.
+</Info>
+
+## Account Data Model
+
+```typescript packages/core/src/accounting/Account.ts
+export class Account extends Schema.Class<Account>("Account")({
+  id: AccountId,
+  companyId: CompanyId,
+  accountNumber: AccountNumber,
+  name: Schema.NonEmptyTrimmedString,
+  accountType: AccountType,
+  accountCategory: AccountCategory,
+  normalBalance: NormalBalance,
+  parentAccountId: Schema.OptionFromNullOr(AccountId),
+  hierarchyLevel: Schema.Number,
+  isPostable: Schema.Boolean,
+  isCashFlowRelevant: Schema.Boolean,
+  cashFlowCategory: Schema.OptionFromNullOr(CashFlowCategory),
+  isIntercompany: Schema.Boolean,
+  currencyRestriction: Schema.OptionFromNullOr(CurrencyCode),
+  isActive: Schema.Boolean,
+  isRetainedEarnings: Schema.Boolean
+})
+```
+
+## Account Types
+
+The five main account classifications per US GAAP:
+
+```typescript packages/core/src/accounting/Account.ts
+export const AccountType = Schema.Literal(
+  "Asset",
+  "Liability",
+  "Equity",
+  "Revenue",
+  "Expense"
+)
+```
+
+<Tabs>
+  <Tab title="Asset">
+    Resources owned by the entity
+    
+    - Normal Balance: **Debit**
+    - Examples: Cash, Accounts Receivable, Inventory, Property
+  </Tab>
+  <Tab title="Liability">
+    Obligations owed by the entity
+    
+    - Normal Balance: **Credit**
+    - Examples: Accounts Payable, Loans, Accrued Expenses
+  </Tab>
+  <Tab title="Equity">
+    Residual interest in assets after deducting liabilities
+    
+    - Normal Balance: **Credit**
+    - Examples: Common Stock, Retained Earnings, AOCI
+  </Tab>
+  <Tab title="Revenue">
+    Income from primary business activities
+    
+    - Normal Balance: **Credit**
+    - Examples: Sales Revenue, Service Revenue, Interest Income
+  </Tab>
+  <Tab title="Expense">
+    Costs incurred to generate revenue
+    
+    - Normal Balance: **Debit**
+    - Examples: Salaries, Rent, Depreciation, Cost of Goods Sold
+  </Tab>
+</Tabs>
+
+## Account Categories
+
+Detailed subcategories within each account type:
+
+### Asset Categories
+
+<ResponseField name="CurrentAsset" type="Asset category">
+  Assets expected to be converted to cash within one year (Cash, AR, Inventory)
+</ResponseField>
+
+<ResponseField name="NonCurrentAsset" type="Asset category">
+  Long-term assets held for more than one year (Long-term Investments)
+</ResponseField>
+
+<ResponseField name="FixedAsset" type="Asset category">
+  Tangible long-term assets (Property, Plant, Equipment)
+</ResponseField>
+
+<ResponseField name="IntangibleAsset" type="Asset category">
+  Non-physical long-term assets (Patents, Trademarks, Goodwill)
+</ResponseField>
+
+### Liability Categories
+
+<ResponseField name="CurrentLiability" type="Liability category">
+  Obligations due within one year (Accounts Payable, Short-term Debt)
+</ResponseField>
+
+<ResponseField name="NonCurrentLiability" type="Liability category">
+  Long-term obligations (Long-term Debt, Deferred Tax Liabilities)
+</ResponseField>
+
+### Equity Categories
+
+<ResponseField name="ContributedCapital" type="Equity category">
+  Capital contributed by shareholders (Common Stock, Paid-in Capital)
+</ResponseField>
+
+<ResponseField name="RetainedEarnings" type="Equity category">
+  Accumulated earnings retained in the business
+</ResponseField>
+
+<ResponseField name="OtherComprehensiveIncome" type="Equity category">
+  Unrealized gains/losses not included in net income (AOCI)
+</ResponseField>
+
+<ResponseField name="TreasuryStock" type="Equity category">
+  Company's own shares repurchased (contra-equity account)
+</ResponseField>
+
+### Revenue Categories
+
+<ResponseField name="OperatingRevenue" type="Revenue category">
+  Revenue from primary business operations
+</ResponseField>
+
+<ResponseField name="OtherRevenue" type="Revenue category">
+  Revenue from non-operating activities (Interest Income, Gain on Sale)
+</ResponseField>
+
+### Expense Categories
+
+<ResponseField name="CostOfGoodsSold" type="Expense category">
+  Direct costs of producing goods sold (COGS)
+</ResponseField>
+
+<ResponseField name="OperatingExpense" type="Expense category">
+  Day-to-day operating costs (Salaries, Rent, Marketing)
+</ResponseField>
+
+<ResponseField name="DepreciationAmortization" type="Expense category">
+  Non-cash expense for asset depreciation/amortization
+</ResponseField>
+
+<ResponseField name="InterestExpense" type="Expense category">
+  Interest paid on debt obligations
+</ResponseField>
+
+<ResponseField name="TaxExpense" type="Expense category">
+  Income tax expense
+</ResponseField>
+
+<ResponseField name="OtherExpense" type="Expense category">
+  Non-operating expenses (Loss on Sale, Impairment)
+</ResponseField>
+
+## Account Numbering Convention
+
+Accountability uses a **4-digit numbering system** with ranges for each account type:
+
+```typescript packages/web/src/components/forms/AccountForm.tsx
+// Account number ranges by type:
+// - 1000-1999: Assets
+// - 2000-2999: Liabilities
+// - 3000-3999: Equity
+// - 4000-4999: Revenue
+// - 5000-9999: Expenses
+```
+
+<Tabs>
+  <Tab title="Assets (1xxx)">
+    **1000-1499**: Current Assets
+    - 1000-1099: Cash and equivalents
+    - 1100-1199: Accounts receivable
+    - 1200-1299: Inventory
+    - 1300-1399: Prepaid expenses
+    - 1400-1499: Other current assets
+    
+    **1500-1999**: Non-Current Assets
+    - 1500-1599: Fixed assets
+    - 1600-1699: Accumulated depreciation (contra-asset)
+    - 1700-1799: Intangible assets
+    - 1800-1899: Long-term investments
+  </Tab>
+  <Tab title="Liabilities (2xxx)">
+    **2000-2499**: Current Liabilities
+    - 2000-2099: Accounts payable
+    - 2100-2199: Accrued expenses
+    - 2200-2299: Short-term debt
+    - 2300-2399: Deferred revenue
+    
+    **2500-2999**: Non-Current Liabilities
+    - 2500-2599: Long-term debt
+    - 2600-2699: Deferred tax liabilities
+  </Tab>
+  <Tab title="Equity (3xxx)">
+    **3000-3999**: Shareholders' Equity
+    - 3000-3099: Common stock
+    - 3100-3199: Paid-in capital
+    - 3200-3299: Retained earnings
+    - 3300-3399: Other comprehensive income
+    - 3400-3499: Treasury stock (contra-equity)
+  </Tab>
+  <Tab title="Revenue (4xxx)">
+    **4000-4999**: Revenue
+    - 4000-4499: Operating revenue
+    - 4500-4999: Other revenue
+  </Tab>
+  <Tab title="Expenses (5xxx-9xxx)">
+    **5000-5999**: Cost of Sales / Direct Costs
+    
+    **6000-7999**: Operating Expenses
+    - 6000-6499: Salaries and benefits
+    - 6500-6999: Rent and facilities
+    - 7000-7499: Marketing and sales
+    - 7500-7999: General and administrative
+    
+    **8000-8999**: Other Income/Expense (Non-Operating)
+    
+    **9000-9999**: Special (Intercompany, Eliminations)
+  </Tab>
+</Tabs>
+
+## Account Hierarchy
+
+Accounts can be organized in a **parent-child hierarchy** for roll-up reporting:
+
+<Steps>
+  <Step title="Top-Level (Summary) Accounts">
+    Parent accounts that summarize child accounts
+    
+    - `parentAccountId`: null
+    - `hierarchyLevel`: 1
+    - `isPostable`: typically false (summary only)
+    
+    **Example**: 1000 - Cash and Cash Equivalents
+  </Step>
+  <Step title="Sub-Accounts">
+    Child accounts that post to a parent
+    
+    - `parentAccountId`: parent account ID
+    - `hierarchyLevel`: 2 or higher
+    - `isPostable`: typically true
+    
+    **Example**: 1010 - Operating Cash Account (parent: 1000)
+  </Step>
+  <Step title="Roll-Up">
+    Parent account balance = sum of all child account balances
+    
+    Hierarchy allows detailed tracking while maintaining summary views
+  </Step>
+</Steps>
+
+### Example Hierarchy
+
+```
+1000 - Cash and Cash Equivalents (Parent, Not Postable)
+  ├─ 1010 - Operating Cash Account (Child, Postable)
+  ├─ 1020 - Payroll Cash Account (Child, Postable)
+  └─ 1030 - Money Market Account (Child, Postable)
+```
+
+## Creating Accounts
+
+### UI Workflow
+
+The account creation form auto-validates account numbers:
+
+<Tabs>
+  <Tab title="Required Fields">
+    - **Account Number**: 4-digit number (validated against type range)
+    - **Account Name**: Display name
+    - **Account Type**: Asset, Liability, Equity, Revenue, Expense
+    - **Category**: Dropdown filtered by selected type
+    - **Normal Balance**: Auto-filled from type (can override)
+  </Tab>
+  <Tab title="Optional Fields">
+    - **Description**: Detailed purpose of account
+    - **Parent Account**: Searchable dropdown of existing accounts
+    - **Cash Flow Category**: Operating, Investing, Financing, NonCash
+    - **Currency Restriction**: Limit to specific currency
+  </Tab>
+  <Tab title="Checkboxes">
+    - **Postable**: Can receive journal entries (default: true)
+    - **Cash Flow Relevant**: Appears on cash flow statement
+    - **Intercompany**: Used for intercompany transactions
+  </Tab>
+</Tabs>
+
+### Account Number Auto-Suggestion
+
+When you enter a 4-digit account number, the form auto-suggests the account type:
+
+```typescript packages/web/src/components/forms/AccountForm.tsx
+export function suggestAccountTypeFromNumber(accountNumber: string): AccountType | null {
+  const numValue = parseInt(accountNumber, 10)
+  
+  if (numValue >= 1000 && numValue <= 1999) return "Asset"
+  if (numValue >= 2000 && numValue <= 2999) return "Liability"
+  if (numValue >= 3000 && numValue <= 3999) return "Equity"
+  if (numValue >= 4000 && numValue <= 4999) return "Revenue"
+  if (numValue >= 5000 && numValue <= 9999) return "Expense"
+  
+  return null
+}
+```
+
+### API Request
+
+```typescript
+const { data, error } = await api.POST('/api/v1/accounts', {
+  body: {
+    organizationId,
+    companyId,
+    accountNumber: "1010",
+    name: "Operating Cash Account",
+    description: "Primary operating bank account",
+    accountType: "Asset",
+    accountCategory: "CurrentAsset",
+    normalBalance: "Debit",
+    parentAccountId: null,
+    isPostable: true,
+    isCashFlowRelevant: true,
+    cashFlowCategory: "Operating",
+    isIntercompany: false,
+    currencyRestriction: null
+  }
+})
+```
+
+## Normal Balance
+
+Each account has a **normal balance** direction:
+
+```typescript packages/core/src/accounting/Account.ts
+export const NormalBalance = Schema.Literal("Debit", "Credit")
+
+export const getNormalBalanceForType = (type: AccountType): NormalBalance => {
+  switch (type) {
+    case "Asset":
+    case "Expense":
+      return "Debit"
+    case "Liability":
+    case "Equity":
+    case "Revenue":
+      return "Credit"
+  }
+}
+```
+
+<Warning>
+**Contra accounts** have opposite normal balance from their account type:
+
+- Accumulated Depreciation (Asset type, Credit balance)
+- Treasury Stock (Equity type, Debit balance)
+- Sales Discounts (Revenue type, Debit balance)
+
+You can override the normal balance in the form for contra accounts.
+</Warning>
+
+## Cash Flow Categories
+
+For accounts that affect cash flow, specify the cash flow statement category per ASC 230:
+
+```typescript packages/core/src/accounting/Account.ts
+export const CashFlowCategory = Schema.Literal(
+  "Operating",    // Principal revenue-producing activities
+  "Investing",    // Acquiring/disposing of long-term assets
+  "Financing",    // Debt, equity, and dividend transactions
+  "NonCash"       // Significant non-cash activities (disclosed separately)
+)
+```
+
+<AccordionGroup>
+  <Accordion title="Operating Activities">
+    Cash flows from principal revenue-producing activities:
+    - Cash received from customers
+    - Cash paid to suppliers and employees
+    - Interest received
+    - Interest paid (US GAAP, can be financing under IFRS)
+  </Accordion>
+
+  <Accordion title="Investing Activities">
+    Cash flows from acquiring/disposing of long-term assets:
+    - Purchase/sale of property, plant, equipment
+    - Purchase/sale of investments
+    - Loans made to others
+  </Accordion>
+
+  <Accordion title="Financing Activities">
+    Cash flows from debt, equity, and dividend transactions:
+    - Proceeds from issuing stock or bonds
+    - Repayment of debt principal
+    - Payment of dividends
+    - Repurchase of company stock
+  </Accordion>
+
+  <Accordion title="Non-Cash Activities">
+    Significant investing/financing activities without cash:
+    - Conversion of debt to equity
+    - Acquisition of assets by assuming liabilities
+    - Disclosed in supplemental schedule
+  </Accordion>
+</AccordionGroup>
+
+## Intercompany Accounts
+
+Accounts used for transactions between related companies:
+
+```typescript
+const intercompanyReceivable = Account.make({
+  // ...
+  accountNumber: "1150",
+  name: "Intercompany Receivable - Acme UK",
+  accountType: "Asset",
+  accountCategory: "CurrentAsset",
+  isIntercompany: true,
+  intercompanyPartnerId: acmeUkCompanyId
+})
+```
+
+<Info>
+Intercompany accounts are used for:
+- Intercompany receivables/payables
+- Intercompany revenue/expense
+- Tracking transactions between related entities for elimination during consolidation
+</Info>
+
+## Currency Restriction
+
+Optionally restrict an account to transactions in a specific currency:
+
+```typescript
+const eurBankAccount = Account.make({
+  // ...
+  accountNumber: "1015",
+  name: "EUR Bank Account",
+  currencyRestriction: "EUR"
+})
+```
+
+When `currencyRestriction` is set:
+- Journal entry lines can **only** post to this account in the specified currency
+- Attempts to post in other currencies will fail validation
+
+<Note>
+Most accounts have `currencyRestriction: null` allowing any currency. Use restrictions only for bank accounts or specific foreign currency accounts.
+</Note>
+
+## Retained Earnings Flag
+
+One account per company should be marked as the retained earnings account:
+
+```typescript
+const retainedEarnings = Account.make({
+  // ...
+  accountNumber: "3200",
+  name: "Retained Earnings",
+  accountType: "Equity",
+  accountCategory: "RetainedEarnings",
+  isRetainedEarnings: true  // Only one account should have this flag
+})
+```
+
+This account is used during **year-end closing**:
+1. All Revenue accounts are closed (credited to zero)
+2. All Expense accounts are closed (debited to zero)
+3. Net income (Revenue - Expenses) is posted to Retained Earnings
+
+## Helper Methods
+
+```typescript packages/core/src/accounting/Account.ts
+const account = Account.make({ /* ... */ })
+
+// Hierarchy checks
+account.isTopLevel           // No parent account
+account.isSubAccount          // Has parent account
+
+// Financial statement classification
+account.isBalanceSheetAccount    // Asset, Liability, or Equity
+account.isIncomeStatementAccount // Revenue or Expense
+
+// Balance checks
+account.hasNormalDebitBalance
+account.hasNormalCreditBalance
+account.hasStandardNormalBalance  // Normal balance matches type
+
+// Other checks
+account.hasCurrencyRestriction
+account.isSummaryAccount      // Not postable (parent account)
+```
+
+## Best Practices
+
+<AccordionGroup>
+  <Accordion title="Account Numbering">
+    - **Use gaps**: Number accounts 1010, 1020, 1030 (not 1001, 1002, 1003) to allow inserting accounts later
+    - **Group related accounts**: Use ranges (1100-1199 for AR, 1200-1299 for Inventory)
+    - **Reserve ranges**: Keep 9000-9999 for special purposes (intercompany, eliminations)
+  </Accordion>
+
+  <Accordion title="Summary vs Detail Accounts">
+    - **Summary accounts** (`isPostable: false`): Used for roll-up reporting
+    - **Detail accounts** (`isPostable: true`): Receive actual journal entries
+    
+    Don't post to summary accounts - posting should be at the detail level.
+  </Accordion>
+
+  <Accordion title="Account Descriptions">
+    Write clear descriptions explaining:
+    - Purpose of the account
+    - What types of transactions should be posted
+    - Any special handling or restrictions
+    
+    Good descriptions help users select the correct account when creating journal entries.
+  </Accordion>
+</AccordionGroup>
+
+## Related Pages
+
+- [Journal Entries](/features/journal-entries) - Recording transactions to accounts
+- [Companies](/features/companies) - Accounts are company-specific
+- [Multi-Currency](/features/multi-currency) - Currency restrictions and translation

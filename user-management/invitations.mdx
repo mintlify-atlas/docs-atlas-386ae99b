@@ -1,0 +1,711 @@
+---
+title: User Invitations
+description: Inviting users to organizations and managing memberships
+---
+
+# User Invitations
+
+Accountability provides a secure invitation system for adding users to organizations. Invitations include role assignments, functional roles, and secure token-based acceptance.
+
+## Invitation Flow
+
+The complete invitation workflow:
+
+<Steps>
+  <Step title="Admin creates invitation">
+    Organization admin or owner creates an invitation for a user's email address, specifying role and functional roles.
+  </Step>
+  
+  <Step title="System generates secure token">
+    A cryptographically secure token (256 bits) is generated. The token hash is stored in the database.
+  </Step>
+  
+  <Step title="Token sent to invitee">
+    The raw token is sent to the invitee via email (token is only available once).
+  </Step>
+  
+  <Step title="Invitee receives email">
+    User receives email with invitation link containing the token.
+  </Step>
+  
+  <Step title="Invitee accepts or declines">
+    User clicks link to accept (creating membership) or decline (revoking invitation).
+  </Step>
+  
+  <Step title="Membership created">
+    On acceptance, an organization membership is created with the specified roles.
+  </Step>
+</Steps>
+
+<Note>
+  Invitations do not expire automatically. They remain pending until accepted, declined, or revoked by an admin.
+</Note>
+
+## Invitation Roles
+
+Invitations can assign three roles (owner cannot be assigned via invitation):
+
+| Role | Access Level | Use Case |
+|------|--------------|----------|
+| **admin** | Full data operations and member management | Department heads, senior accountants |
+| **member** | Access based on functional roles | Accounting staff, finance team |
+| **viewer** | Read-only access | Auditors, executives |
+
+<Warning>
+  The `owner` role cannot be assigned via invitation. Ownership is only transferred via the explicit transfer ownership operation.
+</Warning>
+
+## Functional Roles
+
+Invitations can also assign functional roles:
+
+| Functional Role | Key Permissions |
+|----------------|----------------|
+| **controller** | Period lock/unlock, consolidation oversight |
+| **finance_manager** | Account management, exchange rates |
+| **accountant** | Journal entry operations |
+| **period_admin** | Period open/close operations |
+| **consolidation_manager** | Consolidation group management |
+
+**Example invitation:**
+
+```json
+{
+  "email": "accountant@example.com",
+  "role": "member",
+  "functionalRoles": ["accountant", "period_admin"]
+}
+```
+
+This creates a member who can create journal entries and manage period status.
+
+## Creating Invitations
+
+### API Endpoint
+
+```http
+POST /v1/organizations/:organizationId/members/invite
+```
+
+**Request Body:**
+
+```json
+{
+  "email": "user@example.com",
+  "role": "member",
+  "functionalRoles": ["accountant"]
+}
+```
+
+**Response:**
+
+```json
+{
+  "invitation": {
+    "id": "inv_xxx",
+    "email": "user@example.com",
+    "role": "member",
+    "functionalRoles": ["accountant"],
+    "status": "pending",
+    "createdAt": "2024-01-15T10:00:00Z",
+    "invitedBy": "user_yyy"
+  },
+  "token": "eyJhbGc..."  // Only returned once
+}
+```
+
+<Warning>
+  The `token` field is only returned when creating an invitation. It must be sent to the invitee immediately and cannot be retrieved later.
+</Warning>
+
+### Using InvitationService
+
+In backend code:
+
+```typescript
+import { InvitationService } from "@accountability/core/membership/InvitationService"
+import { Effect } from "effect"
+
+const program = Effect.gen(function* () {
+  const invitationService = yield* InvitationService
+  
+  const { invitation, rawToken } = yield* invitationService.createInvitation({
+    organizationId,
+    email: "user@example.com",
+    role: "member",
+    functionalRoles: ["accountant"],
+    invitedBy: currentUserId
+  })
+  
+  // Send rawToken to user via email
+  yield* sendInvitationEmail(invitation.email, rawToken)
+  
+  return invitation
+})
+```
+
+Location: `packages/core/src/membership/InvitationService.ts`
+
+### Business Rules
+
+<Accordion title="Invitation Validation">
+
+**Email validation:**
+- Must be a valid email format
+- Can invite the same email multiple times (previous invitation must be accepted/declined first)
+
+**Role validation:**
+- Role must be `admin`, `member`, or `viewer`
+- Cannot invite as `owner` (use transfer ownership instead)
+
+**Functional roles:**
+- Can specify zero or more functional roles
+- Functional roles are applied when invitation is accepted
+
+**Permission requirements:**
+- Only admins and owners can create invitations
+- Checked via `organization:invite_member` permission
+
+</Accordion>
+
+<Accordion title="Token Security">
+
+**Token generation:**
+- 256-bit cryptographically secure random token
+- Base64url encoded for URL safety
+- Generated using `crypto.getRandomValues()` or equivalent
+
+**Token storage:**
+- Only SHA-256 hash stored in database
+- Raw token never stored or logged
+- Token only returned once (on invitation creation)
+
+**Token validation:**
+- Hash must match stored hash
+- Invitation must be in "pending" status
+- No expiration check (invitations don't expire)
+
+</Accordion>
+
+## Accepting Invitations
+
+### API Endpoint
+
+```http
+POST /v1/invitations/:token/accept
+```
+
+**Response:**
+
+```json
+{
+  "invitation": {
+    "id": "inv_xxx",
+    "email": "user@example.com",
+    "status": "accepted",
+    "acceptedAt": "2024-01-15T10:30:00Z",
+    "acceptedBy": "user_zzz"
+  },
+  "membership": {
+    "id": "mem_xxx",
+    "userId": "user_zzz",
+    "organizationId": "org_xxx",
+    "role": "member",
+    "isAccountant": true,
+    "status": "active",
+    "createdAt": "2024-01-15T10:30:00Z"
+  }
+}
+```
+
+### Using InvitationService
+
+```typescript
+const program = Effect.gen(function* () {
+  const invitationService = yield* InvitationService
+  
+  const { invitation, membership } = yield* invitationService.acceptInvitation(
+    token,  // From URL or email link
+    currentUserId
+  )
+  
+  // User is now a member of the organization
+  return { invitation, membership }
+})
+```
+
+### What Happens on Acceptance
+
+<Steps>
+  <Step title="Validate token">
+    Hash token and look up invitation by hash
+  </Step>
+  
+  <Step title="Check invitation status">
+    Verify invitation is in "pending" status (not already accepted or revoked)
+  </Step>
+  
+  <Step title="Check existing membership">
+    Verify user is not already a member of the organization
+  </Step>
+  
+  <Step title="Create membership">
+    Create organization membership with specified role and functional roles
+  </Step>
+  
+  <Step title="Mark invitation accepted">
+    Update invitation status to "accepted" with timestamp and user ID
+  </Step>
+  
+  <Step title="Return result">
+    Return both updated invitation and new membership
+  </Step>
+</Steps>
+
+<Note>
+  If a user already exists in the system (same email), the invitation is linked to their existing account. If not, they may need to register first.
+</Note>
+
+## Declining Invitations
+
+### API Endpoint
+
+```http
+POST /v1/invitations/:token/decline
+```
+
+**Response:**
+
+```json
+{
+  "id": "inv_xxx",
+  "email": "user@example.com",
+  "status": "revoked",
+  "revokedAt": "2024-01-15T10:45:00Z"
+}
+```
+
+### Using InvitationService
+
+```typescript
+const program = Effect.gen(function* () {
+  const invitationService = yield* InvitationService
+  
+  const invitation = yield* invitationService.declineInvitation(token)
+  
+  // Invitation marked as revoked
+  return invitation
+})
+```
+
+<Note>
+  Declining an invitation marks it as "revoked". The same user can be invited again later if needed.
+</Note>
+
+## Revoking Invitations (Admin)
+
+Admins and owners can revoke pending invitations:
+
+### API Endpoint
+
+```http
+DELETE /v1/organizations/:organizationId/invitations/:invitationId
+```
+
+**Response:**
+
+```json
+{
+  "id": "inv_xxx",
+  "email": "user@example.com",
+  "status": "revoked",
+  "revokedAt": "2024-01-15T11:00:00Z",
+  "revokedBy": "admin_user_id"
+}
+```
+
+### Using InvitationService
+
+```typescript
+const program = Effect.gen(function* () {
+  const invitationService = yield* InvitationService
+  
+  const invitation = yield* invitationService.revokeInvitation(
+    invitationId,
+    adminUserId  // User performing the revocation
+  )
+  
+  return invitation
+})
+```
+
+**Use cases for revoking:**
+- User no longer needs access
+- Invitation sent to wrong email
+- Role/functional roles need to change (revoke and re-invite)
+- User left company before accepting
+
+## Listing Invitations
+
+### User's Pending Invitations
+
+Users can see invitations sent to their email:
+
+```http
+GET /v1/users/me/invitations
+```
+
+**Response:**
+
+```json
+[
+  {
+    "id": "inv_xxx",
+    "organizationId": "org_xxx",
+    "organizationName": "Acme Corp",
+    "email": "user@example.com",
+    "role": "member",
+    "functionalRoles": ["accountant"],
+    "invitedBy": {
+      "id": "user_yyy",
+      "displayName": "John Admin",
+      "email": "admin@example.com"
+    },
+    "createdAt": "2024-01-15T10:00:00Z"
+  }
+]
+```
+
+### Organization's Pending Invitations
+
+Admins and owners can see all pending invitations for an organization:
+
+```http
+GET /v1/organizations/:organizationId/invitations
+```
+
+**Response:**
+
+```json
+[
+  {
+    "id": "inv_xxx",
+    "email": "user@example.com",
+    "role": "member",
+    "functionalRoles": ["accountant"],
+    "status": "pending",
+    "invitedBy": {
+      "id": "user_yyy",
+      "displayName": "John Admin"
+    },
+    "createdAt": "2024-01-15T10:00:00Z"
+  }
+]
+```
+
+## Domain Models
+
+### OrganizationInvitation
+
+The invitation entity:
+
+```typescript
+class OrganizationInvitation {
+  id: InvitationId                // Unique identifier
+  organizationId: OrganizationId  // Target organization
+  email: string                   // Invitee email
+  role: "admin" | "member" | "viewer"  // Role to assign
+  functionalRoles: FunctionalRole[]    // Functional roles to assign
+  tokenHash: string               // SHA-256 hash of token
+  
+  status: InvitationStatus        // pending | accepted | revoked
+  acceptedAt?: Timestamp          // When accepted
+  acceptedBy?: AuthUserId         // Who accepted
+  revokedAt?: Timestamp           // When revoked
+  revokedBy?: AuthUserId          // Who revoked
+  
+  createdAt: Timestamp
+  invitedBy: AuthUserId
+  
+  // Methods
+  isPending(): boolean
+  isAccepted(): boolean
+  isRevoked(): boolean
+}
+```
+
+Location: `packages/core/src/membership/OrganizationInvitation.ts`
+
+### InvitationStatus
+
+Invitation lifecycle states:
+
+```typescript
+type InvitationStatus = "pending" | "accepted" | "revoked"
+```
+
+| Status | Description |
+|--------|-------------|
+| **pending** | Invitation created, awaiting response |
+| **accepted** | User accepted and membership created |
+| **revoked** | Invitation declined by user or revoked by admin |
+
+Location: `packages/core/src/membership/InvitationStatus.ts`
+
+## Member Management
+
+Once a user accepts an invitation, they become a member of the organization.
+
+### Organization Membership
+
+```typescript
+class OrganizationMembership {
+  id: OrganizationMembershipId
+  userId: AuthUserId
+  organizationId: OrganizationId
+  
+  role: BaseRole  // owner | admin | member | viewer
+  
+  // Functional roles (boolean flags)
+  isController: boolean
+  isFinanceManager: boolean
+  isAccountant: boolean
+  isPeriodAdmin: boolean
+  isConsolidationManager: boolean
+  
+  status: MembershipStatus  // active | suspended | removed
+  
+  // Audit fields
+  removedAt?: Timestamp
+  removedBy?: AuthUserId
+  removalReason?: string
+  reinstatedAt?: Timestamp
+  reinstatedBy?: AuthUserId
+  
+  createdAt: Timestamp
+  updatedAt: Timestamp
+  invitedBy?: AuthUserId
+}
+```
+
+Location: `packages/core/src/membership/OrganizationMembership.ts`
+
+### Updating Member Roles
+
+Admins and owners can update member roles:
+
+```http
+PATCH /v1/organizations/:organizationId/members/:userId
+```
+
+**Request Body:**
+
+```json
+{
+  "role": "admin",
+  "functionalRoles": ["accountant", "finance_manager"]
+}
+```
+
+### Removing Members
+
+Admins and owners can remove members (soft delete):
+
+```http
+DELETE /v1/organizations/:organizationId/members/:userId
+```
+
+**Request Body:**
+
+```json
+{
+  "reason": "User left company"
+}
+```
+
+<Warning>
+  Organization owners cannot be removed. Ownership must be transferred first.
+</Warning>
+
+### Reinstating Members
+
+Previously removed members can be reinstated:
+
+```http
+POST /v1/organizations/:organizationId/members/:userId/reinstate
+```
+
+This reactivates their membership with their previous role and functional roles.
+
+## Frontend Integration
+
+### Members Page
+
+The members management page provides a complete UI for:
+
+- Viewing active members
+- Viewing inactive members (suspended/removed)
+- Inviting new members
+- Editing member roles
+- Removing members
+- Reinstating removed members
+- Viewing pending invitations
+- Revoking invitations
+
+Location: `packages/web/src/routes/organizations/$organizationId/settings/members.tsx`
+
+### Invitation Components
+
+**InviteMemberModal:**
+
+```typescript
+function InviteMemberModal({ 
+  isOpen, 
+  onClose, 
+  organizationId 
+}) {
+  // Form for email, role, functional roles
+  // Calls POST /api/v1/organizations/{orgId}/members/invite
+}
+```
+
+**PendingInvitationsSection:**
+
+```typescript
+function PendingInvitationsSection({ 
+  invitations, 
+  organizationId 
+}) {
+  // Lists pending invitations
+  // Allows revoking invitations
+  // Calls DELETE /api/v1/organizations/{orgId}/invitations/{id}
+}
+```
+
+### User Invitation Acceptance
+
+When a user clicks an invitation link:
+
+```typescript
+// Route: /accept-invitation/:token
+
+function AcceptInvitationPage() {
+  const { token } = useParams()
+  
+  const handleAccept = async () => {
+    const response = await api.POST("/v1/invitations/{token}/accept", {
+      params: { path: { token } }
+    })
+    
+    // Redirect to organization
+    navigate(`/organizations/${response.data.membership.organizationId}`)
+  }
+  
+  return (
+    <div>
+      <h1>You've been invited to join an organization</h1>
+      <Button onClick={handleAccept}>Accept Invitation</Button>
+      <Button onClick={handleDecline}>Decline</Button>
+    </div>
+  )
+}
+```
+
+## Email Integration
+
+The invitation system requires email integration for sending invitation links:
+
+### Email Template
+
+**Subject:** You've been invited to join [Organization Name]
+
+**Body:**
+
+```
+Hi,
+
+[Admin Name] has invited you to join [Organization Name] as a [Role].
+
+Click the link below to accept this invitation:
+
+[Accept Link]
+
+Or decline:
+
+[Decline Link]
+
+This invitation does not expire, but can be revoked by an administrator.
+
+Best regards,
+Accountability Team
+```
+
+**Links:**
+
+```
+Accept: https://app.example.com/accept-invitation/{token}
+Decline: https://app.example.com/decline-invitation/{token}
+```
+
+<Note>
+  Email service integration is not included in the core system. Implement using your preferred email service (SendGrid, Mailgun, etc.).
+</Note>
+
+## Troubleshooting
+
+<Accordion title="Invitation Issues">
+
+**"Invalid invitation" error:**
+1. Check token is correct (no extra spaces/characters)
+2. Verify invitation hasn't been accepted or revoked
+3. Confirm invitation exists in database
+
+**Cannot create invitation:**
+1. Check user has admin or owner role
+2. Verify organization exists
+3. Check no pending invitation exists for this email
+
+**Email not received:**
+1. Check email service logs
+2. Verify email address is correct
+3. Check spam folder
+4. Confirm email service credentials are valid
+
+</Accordion>
+
+<Accordion title="Acceptance Issues">
+
+**"User already member" error:**
+- User already has membership in this organization
+- Check if they should update role instead
+- Revoke invitation if not needed
+
+**Token expired:**
+- Invitations don't expire, but can be revoked
+- Check invitation status in database
+- Admin may need to create new invitation
+
+**Cannot accept after decline:**
+- Declining marks invitation as revoked
+- Admin must create new invitation
+
+</Accordion>
+
+<Accordion title="Member Management Issues">
+
+**Cannot remove owner:**
+- Owners cannot be removed directly
+- Must transfer ownership first
+- Then previous owner can be removed if needed
+
+**Role update not working:**
+1. Check user has admin or owner permission
+2. Verify membership exists and is active
+3. Confirm new role is valid
+
+**Reinstate not working:**
+- Can only reinstate removed members
+- Check membership status is "removed"
+- Verify user has admin/owner permission
+
+</Accordion>

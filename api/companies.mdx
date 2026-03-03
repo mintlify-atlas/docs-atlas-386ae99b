@@ -1,0 +1,367 @@
+---
+title: Companies API
+description: Manage organizations and companies, the top-level entities in the accounting system
+---
+
+# Companies API
+
+The Companies API provides endpoints for managing organizations (top-level containers) and companies (legal entities). Each organization can contain multiple companies, each with its own Chart of Accounts.
+
+## Base Path
+
+```
+/api/v1
+```
+
+All endpoints require authentication with a valid session token.
+
+## Organizations
+
+Organizations are the top-level container for companies and shared settings like reporting currency.
+
+### List Organizations
+
+Retrieve all organizations accessible by the current user.
+
+```bash GET /api/v1/organizations
+curl -X GET "https://your-instance.accountability.app/api/v1/organizations" \
+  -H "Authorization: Bearer your-session-token"
+```
+
+<ResponseExample>
+```json
+{
+  "organizations": [
+    {
+      "id": "org_123e4567-e89b-12d3-a456-426614174000",
+      "name": "Acme Corporation",
+      "reportingCurrency": "USD",
+      "settings": {
+        "fiscalYearEnd": { "month": 12, "day": 31 }
+      },
+      "createdAt": "2025-01-01T00:00:00Z",
+      "updatedAt": "2025-01-01T00:00:00Z"
+    }
+  ],
+  "total": 1
+}
+```
+</ResponseExample>
+
+### Get Organization
+
+Retrieve a single organization by ID.
+
+```bash GET /api/v1/organizations/{id}
+curl -X GET "https://your-instance.accountability.app/api/v1/organizations/{orgId}" \
+  -H "Authorization: Bearer your-session-token"
+```
+
+### Create Organization
+
+Create a new organization. The current user becomes the organization owner.
+
+```bash POST /api/v1/organizations
+curl -X POST "https://your-instance.accountability.app/api/v1/organizations" \
+  -H "Authorization: Bearer your-session-token" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "My Company Group",
+    "reportingCurrency": "USD",
+    "settings": {
+      "fiscalYearEnd": { "month": 12, "day": 31 }
+    }
+  }'
+```
+
+<ParamField body="name" type="string" required>
+  Organization name (must be unique)
+</ParamField>
+
+<ParamField body="reportingCurrency" type="string" required>
+  ISO 4217 currency code for consolidated reporting (e.g., "USD", "EUR")
+</ParamField>
+
+<ParamField body="settings" type="object">
+  Organization settings
+  - `fiscalYearEnd`: Object with `month` (1-12) and `day` (1-31) for fiscal year end date
+</ParamField>
+
+### Update Organization
+
+Update an existing organization. Only provided fields are updated.
+
+```bash PUT /api/v1/organizations/{id}
+curl -X PUT "https://your-instance.accountability.app/api/v1/organizations/{orgId}" \
+  -H "Authorization: Bearer your-session-token" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "Updated Organization Name",
+    "reportingCurrency": "EUR"
+  }'
+```
+
+### Delete Organization
+
+Delete an organization. Organizations can only be deleted if they contain no companies.
+
+```bash DELETE /api/v1/organizations/{id}
+curl -X DELETE "https://your-instance.accountability.app/api/v1/organizations/{orgId}" \
+  -H "Authorization: Bearer your-session-token"
+```
+
+<Warning>
+Organizations with companies cannot be deleted. You must first delete or move all companies.
+</Warning>
+
+## Companies
+
+Companies are legal entities within an organization, each with its own Chart of Accounts, fiscal periods, and financial data.
+
+### List Companies
+
+Retrieve a paginated list of companies for an organization.
+
+```bash GET /api/v1/companies
+curl -X GET "https://your-instance.accountability.app/api/v1/companies?organizationId={orgId}&isActive=true&limit=50" \
+  -H "Authorization: Bearer your-session-token"
+```
+
+<ParamField query="organizationId" type="string" required>
+  Organization UUID
+</ParamField>
+
+<ParamField query="isActive" type="boolean">
+  Filter by active status
+</ParamField>
+
+<ParamField query="jurisdiction" type="string">
+  Filter by jurisdiction code (e.g., "US", "GB")
+</ParamField>
+
+<ParamField query="limit" type="integer" default="50">
+  Maximum items per page
+</ParamField>
+
+<ParamField query="offset" type="integer" default="0">
+  Number of items to skip
+</ParamField>
+
+<ResponseExample>
+```json
+{
+  "companies": [
+    {
+      "id": "comp_123e4567-e89b-12d3-a456-426614174000",
+      "organizationId": "org_123e4567-e89b-12d3-a456-426614174000",
+      "name": "Acme Inc.",
+      "legalName": "Acme Incorporated",
+      "jurisdiction": "US-DE",
+      "taxId": "12-3456789",
+      "incorporationDate": "2020-01-15",
+      "registrationNumber": "DE12345678",
+      "registeredAddress": {
+        "line1": "123 Business St",
+        "line2": "Suite 100",
+        "city": "Wilmington",
+        "region": "DE",
+        "postalCode": "19801",
+        "country": "US"
+      },
+      "industryCode": "5112",
+      "companyType": "Corporation",
+      "incorporationJurisdiction": "US-DE",
+      "functionalCurrency": "USD",
+      "reportingCurrency": "USD",
+      "fiscalYearEnd": { "month": 12, "day": 31 },
+      "retainedEarningsAccountId": "acc_retain_123",
+      "isActive": true,
+      "createdAt": "2025-01-01T00:00:00Z",
+      "updatedAt": "2025-01-01T00:00:00Z"
+    }
+  ],
+  "total": 1,
+  "limit": 50,
+  "offset": 0
+}
+```
+</ResponseExample>
+
+### Get Company
+
+Retrieve a single company by ID.
+
+```bash GET /api/v1/organizations/{organizationId}/companies/{id}
+curl -X GET "https://your-instance.accountability.app/api/v1/organizations/{orgId}/companies/{companyId}" \
+  -H "Authorization: Bearer your-session-token"
+```
+
+### Create Company
+
+Create a new company within an organization.
+
+```bash POST /api/v1/companies
+curl -X POST "https://your-instance.accountability.app/api/v1/companies" \
+  -H "Authorization: Bearer your-session-token" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "organizationId": "org_123e4567-e89b-12d3-a456-426614174000",
+    "name": "Acme Inc.",
+    "legalName": "Acme Incorporated",
+    "jurisdiction": "US-DE",
+    "taxId": "12-3456789",
+    "incorporationDate": "2020-01-15",
+    "registrationNumber": "DE12345678",
+    "registeredAddress": {
+      "line1": "123 Business St",
+      "city": "Wilmington",
+      "region": "DE",
+      "postalCode": "19801",
+      "country": "US"
+    },
+    "industryCode": "5112",
+    "companyType": "Corporation",
+    "incorporationJurisdiction": "US-DE",
+    "functionalCurrency": "USD",
+    "reportingCurrency": "USD",
+    "fiscalYearEnd": { "month": 12, "day": 31 }
+  }'
+```
+
+<ParamField body="organizationId" type="string" required>
+  Organization UUID
+</ParamField>
+
+<ParamField body="name" type="string" required>
+  Company display name
+</ParamField>
+
+<ParamField body="legalName" type="string" required>
+  Legal entity name
+</ParamField>
+
+<ParamField body="jurisdiction" type="string" required>
+  Jurisdiction code (e.g., "US-DE", "GB", "FR")
+</ParamField>
+
+<ParamField body="taxId" type="string">
+  Tax identification number
+</ParamField>
+
+<ParamField body="incorporationDate" type="string">
+  Date of incorporation (ISO 8601: YYYY-MM-DD)
+</ParamField>
+
+<ParamField body="registrationNumber" type="string">
+  Company registration number
+</ParamField>
+
+<ParamField body="registeredAddress" type="object">
+  Registered address
+  - `line1` (string, required)
+  - `line2` (string, optional)
+  - `city` (string, required)
+  - `region` (string): State/province code
+  - `postalCode` (string, required)
+  - `country` (string, required): ISO 3166-1 alpha-2 code
+</ParamField>
+
+<ParamField body="industryCode" type="string">
+  NAICS industry code
+</ParamField>
+
+<ParamField body="companyType" type="enum">
+  Company type: `Corporation`, `LLC`, `Partnership`, `SoleProprietor`, `NonProfit`, `Trust`, `Other`
+</ParamField>
+
+<ParamField body="incorporationJurisdiction" type="string">
+  Jurisdiction where company is incorporated
+</ParamField>
+
+<ParamField body="functionalCurrency" type="string" required>
+  ISO 4217 currency code for day-to-day operations (e.g., "USD")
+</ParamField>
+
+<ParamField body="reportingCurrency" type="string" required>
+  ISO 4217 currency code for financial reporting (e.g., "USD")
+</ParamField>
+
+<ParamField body="fiscalYearEnd" type="object" required>
+  Fiscal year end date
+  - `month` (integer, 1-12): Month
+  - `day` (integer, 1-31): Day
+</ParamField>
+
+### Update Company
+
+Update an existing company. Only provided fields are updated.
+
+```bash PUT /api/v1/organizations/{organizationId}/companies/{id}
+curl -X PUT "https://your-instance.accountability.app/api/v1/organizations/{orgId}/companies/{companyId}" \
+  -H "Authorization: Bearer your-session-token" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "Updated Company Name",
+    "reportingCurrency": "EUR",
+    "isActive": true
+  }'
+```
+
+<Note>
+Functional currency cannot be changed after creation as it would affect all historical transactions.
+</Note>
+
+### Deactivate Company
+
+Deactivate a company (soft delete). Companies with unposted journal entries cannot be deactivated.
+
+```bash DELETE /api/v1/organizations/{organizationId}/companies/{id}
+curl -X DELETE "https://your-instance.accountability.app/api/v1/organizations/{orgId}/companies/{companyId}" \
+  -H "Authorization: Bearer your-session-token"
+```
+
+## Error Responses
+
+<AccordionGroup>
+  <Accordion title="Organization Not Found (404)">
+    ```json
+    {
+      "_tag": "OrganizationNotFoundError",
+      "organizationId": "org_123e4567-e89b-12d3-a456-426614174000",
+      "message": "Organization not found"
+    }
+    ```
+  </Accordion>
+  
+  <Accordion title="Company Not Found (404)">
+    ```json
+    {
+      "_tag": "CompanyNotFoundError",
+      "companyId": "comp_123e4567-e89b-12d3-a456-426614174000",
+      "message": "Company not found"
+    }
+    ```
+  </Accordion>
+  
+  <Accordion title="Organization Has Companies (409)">
+    ```json
+    {
+      "_tag": "OrganizationHasCompaniesError",
+      "organizationId": "org_123e4567-e89b-12d3-a456-426614174000",
+      "companyCount": 3,
+      "message": "Cannot delete organization with 3 companies"
+    }
+    ```
+  </Accordion>
+  
+  <Accordion title="Company Name Already Exists (409)">
+    ```json
+    {
+      "_tag": "CompanyNameAlreadyExistsError",
+      "name": "Acme Inc.",
+      "organizationId": "org_123e4567-e89b-12d3-a456-426614174000",
+      "message": "A company with the name 'Acme Inc.' already exists in this organization"
+    }
+    ```
+  </Accordion>
+</AccordionGroup>

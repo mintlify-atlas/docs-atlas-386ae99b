@@ -1,0 +1,752 @@
+---
+title: Authorization
+description: Role-based authorization, policies, and permissions in Accountability
+---
+
+# Authorization
+
+Accountability implements a hybrid **RBAC (Role-Based Access Control)** and **ABAC (Attribute-Based Access Control)** authorization system for fine-grained access control.
+
+## Architecture Overview
+
+The authorization system combines:
+
+1. **Base Roles** - Hierarchical roles (owner, admin, member, viewer)
+2. **Functional Roles** - Task-specific capabilities (controller, accountant, etc.)
+3. **ABAC Policies** - Attribute-based rules for fine-grained control
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                   Authorization Decision                         │
+│                                                                  │
+│  1. Check ABAC Policies (if exist)                             │
+│     ├─ Deny policies evaluated first                           │
+│     └─ Allow policies by priority                              │
+│                                                                  │
+│  2. Fallback to RBAC Permission Matrix                         │
+│     ├─ Base role permissions                                   │
+│     └─ Functional role permissions                             │
+│                                                                  │
+│  3. Default: Deny                                              │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+## Base Roles
+
+Base roles define hierarchical access levels within an organization:
+
+| Role | Description | Key Permissions |
+|------|-------------|----------------|
+| **owner** | Organization creator/owner | Full access, can delete org and transfer ownership |
+| **admin** | Organization administrator | Full data operations and member management (cannot delete org) |
+| **member** | Standard user | Access based on assigned functional roles |
+| **viewer** | Read-only user | View data and reports only |
+
+<Note>
+  The `owner` role cannot be assigned via invitation - only transferred from the current owner.
+</Note>
+
+## Functional Roles
+
+Functional roles grant additional capabilities to members:
+
+| Role | Key Permissions | Use Case |
+|------|----------------|----------|
+| **controller** | Period lock/unlock, consolidation oversight | CFO or controller role |
+| **finance_manager** | Account management, exchange rates | Finance team leads |
+| **accountant** | Journal entry operations | Accounting staff |
+| **period_admin** | Period open/close operations | Month-end close managers |
+| **consolidation_manager** | Consolidation group management | Consolidation team |
+
+<Note>
+  Functional roles are additive. A member can have multiple functional roles simultaneously.
+</Note>
+
+## Permission Matrix (RBAC)
+
+The hardcoded permission matrix defines base permissions:
+
+### Organization Permissions
+
+| Action | Owner | Admin | Member | Viewer |
+|--------|-------|-------|--------|--------|
+| `organization:read` | ✅ | ✅ | ✅ | ✅ |
+| `organization:update` | ✅ | ✅ | ❌ | ❌ |
+| `organization:delete` | ✅ | ❌ | ❌ | ❌ |
+| `organization:invite_member` | ✅ | ✅ | ❌ | ❌ |
+| `organization:remove_member` | ✅ | ✅ | ❌ | ❌ |
+
+### Company Permissions
+
+| Action | Owner | Admin | Member | Viewer |
+|--------|-------|-------|--------|--------|
+| `company:read` | ✅ | ✅ | ✅ | ✅ |
+| `company:create` | ✅ | ✅ | ❌ | ❌ |
+| `company:update` | ✅ | ✅ | ❌ | ❌ |
+| `company:delete` | ✅ | ✅ | ❌ | ❌ |
+
+### Account Permissions
+
+| Action | Owner | Admin | Member + Finance Manager | Viewer |
+|--------|-------|-------|-------------------------|--------|
+| `account:read` | ✅ | ✅ | ✅ | ✅ |
+| `account:create` | ✅ | ✅ | ✅ | ❌ |
+| `account:update` | ✅ | ✅ | ✅ | ❌ |
+| `account:delete` | ✅ | ✅ | ✅ | ❌ |
+
+### Journal Entry Permissions
+
+| Action | Owner | Admin | Member + Accountant | Viewer |
+|--------|-------|-------|---------------------|--------|
+| `journal_entry:read` | ✅ | ✅ | ✅ | ✅ |
+| `journal_entry:create` | ✅ | ✅ | ✅ | ❌ |
+| `journal_entry:update` | ✅ | ✅ | ✅ | ❌ |
+| `journal_entry:post` | ✅ | ✅ | ✅ | ❌ |
+| `journal_entry:reverse` | ✅ | ✅ | ✅ | ❌ |
+
+### Period Permissions
+
+| Action | Owner | Admin | Member + Period Admin | Viewer |
+|--------|-------|-------|----------------------|--------|
+| `fiscal_period:read` | ✅ | ✅ | ✅ | ✅ |
+| `fiscal_period:open` | ✅ | ✅ | ✅ | ❌ |
+| `fiscal_period:close` | ✅ | ✅ | ✅ | ❌ |
+| `fiscal_period:lock` | ✅ | ✅ | Member + Controller | ❌ |
+| `fiscal_period:unlock` | ✅ | ✅ | Member + Controller | ❌ |
+
+### Consolidation Permissions
+
+| Action | Owner | Admin | Member + Consolidation Manager | Viewer |
+|--------|-------|-------|-------------------------------|--------|
+| `consolidation_group:read` | ✅ | ✅ | ✅ | ✅ |
+| `consolidation_group:create` | ✅ | ✅ | ✅ | ❌ |
+| `consolidation_group:update` | ✅ | ✅ | ✅ | ❌ |
+| `consolidation_group:delete` | ✅ | ✅ | ✅ | ❌ |
+| `consolidation_group:run` | ✅ | ✅ | ✅ | ❌ |
+
+## ABAC Policies
+
+ABAC policies provide fine-grained control beyond the base permission matrix.
+
+### Policy Structure
+
+Each policy consists of:
+
+```typescript
+interface AuthorizationPolicy {
+  id: PolicyId
+  organizationId: OrganizationId
+  name: string
+  description?: string
+  
+  // Conditions
+  subject: SubjectCondition      // Who this applies to
+  resource: ResourceCondition    // What resources
+  action: ActionCondition        // What actions
+  environment?: EnvironmentCondition  // Optional context
+  
+  // Decision
+  effect: "allow" | "deny"      // Allow or deny access
+  priority: number               // 0-1000 (higher = evaluated first)
+  
+  // Status
+  isSystemPolicy: boolean        // System policies cannot be modified
+  isActive: boolean              // Whether policy is active
+  
+  createdAt: Timestamp
+  updatedAt: Timestamp
+  createdBy?: AuthUserId
+}
+```
+
+Location: `packages/core/src/authorization/AuthorizationPolicy.ts`
+
+### Policy Evaluation
+
+<Steps>
+  <Step title="Filter active policies">
+    Only active policies for the organization are considered
+  </Step>
+  
+  <Step title="Evaluate deny policies first">
+    Any matching deny policy immediately denies access (priority-ordered)
+  </Step>
+  
+  <Step title="Evaluate allow policies">
+    Allow policies evaluated by priority (highest first). First match grants access.
+  </Step>
+  
+  <Step title="Default deny">
+    If no policies match, access is denied
+  </Step>
+</Steps>
+
+<Note>
+  Deny policies always take precedence over allow policies at the same priority level.
+</Note>
+
+### Subject Conditions
+
+Define **who** the policy applies to:
+
+```typescript
+interface SubjectCondition {
+  roles?: BaseRole[]              // Any of these base roles
+  functionalRoles?: FunctionalRole[]  // Any of these functional roles
+  userIds?: AuthUserId[]          // Specific user IDs
+  isPlatformAdmin?: boolean       // Platform admin flag
+}
+```
+
+**Example:**
+
+```typescript
+// Applies to members with accountant or finance_manager roles
+{
+  roles: ["member"],
+  functionalRoles: ["accountant", "finance_manager"]
+}
+```
+
+### Resource Conditions
+
+Define **what** resources the policy applies to:
+
+```typescript
+interface ResourceCondition {
+  type: string  // "*" | "organization" | "company" | "account" | "journal_entry" | etc.
+  attributes?: {
+    accountNumber?: {
+      min?: string
+      max?: string
+      values?: string[]
+    }
+    accountType?: AccountType[]
+    entryType?: EntryType[]
+    periodStatus?: ("Open" | "SoftClose" | "Closed" | "Locked" | "Future")[]
+    isIntercompany?: boolean
+    isOwnEntry?: boolean
+  }
+}
+```
+
+**Examples:**
+
+```typescript
+// All resources
+{ type: "*" }
+
+// Journal entries in locked periods
+{
+  type: "journal_entry",
+  attributes: {
+    periodStatus: ["Locked"]
+  }
+}
+
+// Revenue accounts (4000-4999)
+{
+  type: "account",
+  attributes: {
+    accountNumber: { min: "4000", max: "4999" }
+  }
+}
+```
+
+### Action Conditions
+
+Define **what actions** the policy applies to:
+
+```typescript
+interface ActionCondition {
+  actions: string[]  // Action patterns, supports "*" and "prefix:*"
+}
+```
+
+**Examples:**
+
+```typescript
+// All actions
+{ actions: ["*"] }
+
+// All journal entry actions
+{ actions: ["journal_entry:*"] }
+
+// Specific actions
+{ actions: ["journal_entry:create", "journal_entry:update"] }
+```
+
+### Environment Conditions
+
+Define **when/where** the policy applies (optional):
+
+```typescript
+interface EnvironmentCondition {
+  timeOfDay?: {
+    start: string  // "HH:MM" format
+    end: string
+  }
+  daysOfWeek?: ("Monday" | "Tuesday" | "Wednesday" | "Thursday" | "Friday" | "Saturday" | "Sunday")[]
+  ipAllowList?: string[]  // CIDR notation
+  ipDenyList?: string[]   // CIDR notation
+}
+```
+
+**Examples:**
+
+```typescript
+// Business hours only
+{
+  timeOfDay: { start: "09:00", end: "17:00" },
+  daysOfWeek: ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"]
+}
+
+// Office network only
+{
+  ipAllowList: ["10.0.0.0/8", "192.168.1.0/24"]
+}
+```
+
+## System Policies
+
+Four system policies are automatically created for each organization:
+
+### 1. Platform Admin Full Access
+
+**Priority:** 1000 (highest)
+
+```typescript
+{
+  name: "Platform Admin Full Access",
+  subject: { isPlatformAdmin: true },
+  resource: { type: "*" },
+  action: { actions: ["*"] },
+  effect: "allow",
+  isSystemPolicy: true
+}
+```
+
+Grants platform administrators complete access to all resources.
+
+### 2. Organization Owner Full Access
+
+**Priority:** 900
+
+```typescript
+{
+  name: "Organization Owner Full Access",
+  subject: { roles: ["owner"] },
+  resource: { type: "*" },
+  action: { actions: ["*"] },
+  effect: "allow",
+  isSystemPolicy: true
+}
+```
+
+Grants organization owners complete access within their organization.
+
+### 3. Locked Period Protection
+
+**Priority:** 999 (higher than owner access)
+
+```typescript
+{
+  name: "Locked Period Protection",
+  subject: { roles: ["owner", "admin", "member", "viewer"] },
+  resource: {
+    type: "journal_entry",
+    attributes: { periodStatus: ["Locked"] }
+  },
+  action: {
+    actions: ["journal_entry:create", "journal_entry:update", "journal_entry:delete"]
+  },
+  effect: "deny",
+  isSystemPolicy: true
+}
+```
+
+Prevents modifications to journal entries in locked periods, even by owners.
+
+<Warning>
+  Locked period protection is a deny policy with higher priority than owner access. Not even owners can modify locked periods.
+</Warning>
+
+### 4. Viewer Read-Only Access
+
+**Priority:** 100 (lowest)
+
+```typescript
+{
+  name: "Viewer Read-Only Access",
+  subject: { roles: ["viewer"] },
+  resource: { type: "*" },
+  action: {
+    actions: [
+      "*:read",
+      "report:*",
+      "organization:read"
+    ]
+  },
+  effect: "allow",
+  isSystemPolicy: true
+}
+```
+
+Grants viewers read access to all resources and ability to generate reports.
+
+<Note>
+  System policies cannot be modified or deleted. Custom policies use priority 0-899.
+</Note>
+
+## Permission Checking
+
+### In Backend Code
+
+Use the `AuthorizationService` to check permissions:
+
+```typescript
+import { AuthorizationService } from "@accountability/core/Auth/AuthorizationService"
+import { Effect } from "effect"
+
+const program = Effect.gen(function* () {
+  const authService = yield* AuthorizationService
+  
+  // Check single permission (throws if denied)
+  yield* authService.checkPermission("company:create")
+  
+  // Check multiple permissions (returns Record<Action, boolean>)
+  const perms = yield* authService.checkPermissions([
+    "company:create",
+    "company:delete",
+    "account:create"
+  ])
+  
+  if (perms["company:create"]) {
+    // User can create companies
+  }
+  
+  // Get all effective permissions
+  const effectivePerms = yield* authService.getEffectivePermissions()
+})
+```
+
+Location: `packages/core/src/authorization/AuthorizationService.ts`
+
+### With Resource Context
+
+For attribute-based checks (e.g., period status):
+
+```typescript
+import { createJournalEntryResourceContext } from "@accountability/core/Auth/matchers/ResourceMatcher"
+
+const program = Effect.gen(function* () {
+  const authService = yield* AuthorizationService
+  
+  // Check permission with resource context
+  yield* authService.checkPermission(
+    "journal_entry:create",
+    createJournalEntryResourceContext({
+      periodStatus: "Open"
+    })
+  )
+  // Allowed if period is open
+  
+  yield* authService.checkPermission(
+    "journal_entry:create",
+    createJournalEntryResourceContext({
+      periodStatus: "Locked"
+    })
+  )
+  // Denied by Locked Period Protection policy
+})
+```
+
+### In Frontend
+
+Use the `usePermissions` hook:
+
+```typescript
+import { usePermissions } from "~/hooks/usePermissions"
+
+function CompanyPage() {
+  const permissions = usePermissions()
+  
+  return (
+    <div>
+      {permissions.canPerform("company:create") && (
+        <Button>Create Company</Button>
+      )}
+      
+      {permissions.isAdminOrOwner && (
+        <MemberManagementSection />
+      )}
+      
+      {permissions.hasRole("owner") && (
+        <DangerZone />
+      )}
+    </div>
+  )
+}
+```
+
+Location: `packages/web/src/hooks/usePermissions.ts`
+
+## Organization Context
+
+Authorization decisions require organization membership context:
+
+### Current Organization Membership
+
+```typescript
+interface CurrentOrganizationMembership {
+  membership: OrganizationMembership
+}
+
+// Provides context for authorization checks
+withOrganizationMembership(membership, effect)
+```
+
+Location: `packages/core/src/membership/CurrentOrganizationMembership.ts`
+
+### Loading Membership
+
+API handlers automatically load membership context:
+
+```typescript
+import { requireOrganizationContext } from "../Layers/OrganizationContextMiddlewareLive"
+
+const handler = requireOrganizationContext(
+  orgIdString,
+  Effect.gen(function* () {
+    // Membership loaded and validated
+    const membership = yield* CurrentOrganizationMembership
+    
+    // Permission checks automatically use membership context
+    yield* requirePermission("company:create")
+    
+    // Proceed with operation
+  })
+)
+```
+
+Location: `packages/api/src/Layers/OrganizationContextMiddlewareLive.ts`
+
+## Audit Logging
+
+All permission denials are logged to the audit log:
+
+```typescript
+interface AuthorizationAuditEntry {
+  userId: AuthUserId
+  organizationId: OrganizationId
+  action: Action
+  resourceType: string
+  denialReason: string
+  ipAddress?: string
+  userAgent?: string
+  timestamp: Timestamp
+}
+```
+
+<Note>
+  Audit logging is fire-and-forget - logging failures do not block the main operation.
+</Note>
+
+Location: `packages/persistence/src/Services/AuthorizationAuditRepository.ts`
+
+## Policy Management API
+
+Admins and owners can manage custom policies:
+
+| Method | Path | Description | Required Permission |
+|--------|------|-------------|--------------------|
+| GET | `/v1/organizations/:orgId/policies` | List all policies | Admin/Owner |
+| GET | `/v1/organizations/:orgId/policies/:id` | Get policy details | Admin/Owner |
+| POST | `/v1/organizations/:orgId/policies` | Create custom policy | Admin/Owner |
+| PATCH | `/v1/organizations/:orgId/policies/:id` | Update policy | Admin/Owner |
+| DELETE | `/v1/organizations/:orgId/policies/:id` | Delete policy | Admin/Owner |
+| POST | `/v1/organizations/:orgId/policies/test` | Test policy evaluation | Admin/Owner |
+
+<Warning>
+  System policies cannot be modified or deleted via the API.
+</Warning>
+
+## Common Use Cases
+
+<Accordion title="Restrict Account Access by Number Range">
+
+**Scenario:** Only finance managers can modify expense accounts (6000-6999).
+
+```typescript
+{
+  name: "Finance Manager Expense Account Access",
+  subject: {
+    roles: ["member"],
+    functionalRoles: ["finance_manager"]
+  },
+  resource: {
+    type: "account",
+    attributes: {
+      accountNumber: { min: "6000", max: "6999" }
+    }
+  },
+  action: {
+    actions: ["account:update", "account:delete"]
+  },
+  effect: "allow",
+  priority: 500
+}
+```
+
+</Accordion>
+
+<Accordion title="Prevent Modifications During Soft Close">
+
+**Scenario:** Only controllers can modify entries during soft close period.
+
+**Step 1:** Deny all users from modifying soft-closed periods:
+
+```typescript
+{
+  name: "Soft Close Default Deny",
+  subject: { roles: ["owner", "admin", "member"] },
+  resource: {
+    type: "journal_entry",
+    attributes: { periodStatus: ["SoftClose"] }
+  },
+  action: {
+    actions: ["journal_entry:create", "journal_entry:update", "journal_entry:delete"]
+  },
+  effect: "deny",
+  priority: 997
+}
+```
+
+**Step 2:** Allow controllers to modify:
+
+```typescript
+{
+  name: "Controller Soft Close Access",
+  subject: {
+    roles: ["member"],
+    functionalRoles: ["controller"]
+  },
+  resource: {
+    type: "journal_entry",
+    attributes: { periodStatus: ["SoftClose"] }
+  },
+  action: {
+    actions: ["journal_entry:*"]
+  },
+  effect: "allow",
+  priority: 998  // Higher than deny policy
+}
+```
+
+</Accordion>
+
+<Accordion title="Time-Based Access Control">
+
+**Scenario:** Journal entries can only be created during business hours.
+
+```typescript
+{
+  name: "Business Hours Only",
+  subject: { roles: ["member"] },
+  resource: { type: "journal_entry" },
+  action: { actions: ["journal_entry:create", "journal_entry:update"] },
+  environment: {
+    timeOfDay: { start: "09:00", end: "17:00" },
+    daysOfWeek: ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"]
+  },
+  effect: "deny",
+  priority: 500
+}
+```
+
+</Accordion>
+
+<Accordion title="IP-Based Access Control">
+
+**Scenario:** Financial operations can only be performed from office network.
+
+```typescript
+{
+  name: "Office Network Only",
+  subject: { roles: ["member"] },
+  resource: { type: "*" },
+  action: {
+    actions: [
+      "journal_entry:post",
+      "fiscal_period:close",
+      "fiscal_period:lock"
+    ]
+  },
+  environment: {
+    ipAllowList: ["10.0.0.0/8", "192.168.1.0/24"]
+  },
+  effect: "allow",
+  priority: 500
+}
+```
+
+</Accordion>
+
+## Troubleshooting
+
+<Accordion title="Permission Denied Issues">
+
+**Check membership:**
+1. Verify user has active membership in organization
+2. Check membership status is "active" (not "suspended" or "removed")
+3. Confirm user's base role and functional roles
+
+**Check policies:**
+1. View all active policies for organization
+2. Check if deny policy is blocking access
+3. Use policy test tool to simulate decision
+
+**Check RBAC matrix:**
+1. Verify action requires correct base role
+2. Check if functional role is required
+3. Confirm permission is in the hardcoded matrix
+
+</Accordion>
+
+<Accordion title="Policy Not Working">
+
+**Verify policy is active:**
+1. Check `isActive` flag is true
+2. Confirm policy belongs to correct organization
+
+**Check priority:**
+1. Higher priority policies evaluated first
+2. Deny policies take precedence over allow
+3. System policies use 900-1000, custom use 0-899
+
+**Verify conditions:**
+1. Subject condition matches user's roles
+2. Resource condition matches resource type and attributes
+3. Action condition matches the action being performed
+4. Environment condition matches current context (if specified)
+
+**Test policy:**
+1. Use policy test API endpoint
+2. Simulate the exact scenario
+3. Check which policies match and in what order
+
+</Accordion>
+
+<Accordion title="System Policy Protection">
+
+**Cannot modify system policy:**
+- System policies are read-only
+- Create custom policies to override (with correct priority)
+- Custom deny policies can block system allow policies
+
+**Locked period protection:**
+- Priority 999 - blocks even owners
+- Only way to modify locked entries is to unlock period
+- Controllers can unlock periods via API
+
+</Accordion>

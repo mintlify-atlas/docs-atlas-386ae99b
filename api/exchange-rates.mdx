@@ -1,0 +1,426 @@
+---
+title: Exchange Rates API
+description: Manage exchange rates for currency translation in multi-currency accounting
+---
+
+# Exchange Rates API
+
+The Exchange Rates API provides endpoints for managing exchange rates used in currency translation for multi-currency accounting per ASC 830.
+
+## Base Path
+
+```
+/api/v1/exchange-rates
+```
+
+All endpoints require authentication with a valid session token.
+
+## Rate Types
+
+Exchange rates support multiple rate types per ASC 830:
+
+- **Spot** - Spot rate for a specific date (for balance sheet items)
+- **Average** - Period average rate (for income statement items)
+- **Historical** - Historical rate at transaction date
+- **YearEnd** - Year-end closing rate (for balance sheet)
+
+## Rate Sources
+
+- **Manual** - Manually entered rates
+- **ECB** - European Central Bank rates
+- **FederalReserve** - US Federal Reserve rates
+- **System** - System-calculated rates (e.g., triangulation)
+
+## List Exchange Rates
+
+Retrieve a paginated list of exchange rates with filtering.
+
+```bash GET /api/v1/exchange-rates
+curl -X GET "https://your-instance.accountability.app/api/v1/exchange-rates?organizationId={orgId}&fromCurrency=EUR&toCurrency=USD&rateType=Spot&startDate=2025-01-01&endDate=2025-03-31" \
+  -H "Authorization: Bearer your-session-token"
+```
+
+<ParamField query="organizationId" type="string" required>
+  Organization UUID
+</ParamField>
+
+<ParamField query="fromCurrency" type="string">
+  Filter by from currency (ISO 4217 code)
+</ParamField>
+
+<ParamField query="toCurrency" type="string">
+  Filter by to currency (ISO 4217 code)
+</ParamField>
+
+<ParamField query="rateType" type="enum">
+  Filter by rate type: `Spot`, `Average`, `Historical`, `YearEnd`
+</ParamField>
+
+<ParamField query="startDate" type="string">
+  Filter by effective date start (ISO 8601: YYYY-MM-DD)
+</ParamField>
+
+<ParamField query="endDate" type="string">
+  Filter by effective date end (ISO 8601: YYYY-MM-DD)
+</ParamField>
+
+<ParamField query="limit" type="integer" default="50">
+  Maximum items per page
+</ParamField>
+
+<ParamField query="offset" type="integer" default="0">
+  Number of items to skip
+</ParamField>
+
+<ResponseExample>
+```json
+{
+  "rates": [
+    {
+      "id": "xr_123e4567-e89b-12d3-a456-426614174000",
+      "organizationId": "org_123e4567-e89b-12d3-a456-426614174000",
+      "fromCurrency": "EUR",
+      "toCurrency": "USD",
+      "rate": "1.0850",
+      "effectiveDate": "2025-03-15",
+      "rateType": "Spot",
+      "source": "ECB",
+      "createdAt": "2025-03-15T10:00:00Z",
+      "updatedAt": "2025-03-15T10:00:00Z"
+    }
+  ],
+  "total": 1,
+  "limit": 50,
+  "offset": 0
+}
+```
+</ResponseExample>
+
+## Get Exchange Rate
+
+Retrieve a single exchange rate by ID.
+
+```bash GET /api/v1/exchange-rates/{id}
+curl -X GET "https://your-instance.accountability.app/api/v1/exchange-rates/{rateId}" \
+  -H "Authorization: Bearer your-session-token"
+```
+
+<ParamField path="id" type="string" required>
+  Exchange rate UUID
+</ParamField>
+
+## Create Exchange Rate
+
+Create a new exchange rate.
+
+```bash POST /api/v1/exchange-rates
+curl -X POST "https://your-instance.accountability.app/api/v1/exchange-rates" \
+  -H "Authorization: Bearer your-session-token" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "organizationId": "org_123e4567-e89b-12d3-a456-426614174000",
+    "fromCurrency": "EUR",
+    "toCurrency": "USD",
+    "rate": "1.0850",
+    "effectiveDate": "2025-03-15",
+    "rateType": "Spot",
+    "source": "Manual"
+  }'
+```
+
+<ParamField body="organizationId" type="string" required>
+  Organization UUID
+</ParamField>
+
+<ParamField body="fromCurrency" type="string" required>
+  From currency (ISO 4217 code, e.g., "EUR")
+</ParamField>
+
+<ParamField body="toCurrency" type="string" required>
+  To currency (ISO 4217 code, e.g., "USD")
+</ParamField>
+
+<ParamField body="rate" type="string" required>
+  Exchange rate (decimal string, e.g., "1.0850")
+</ParamField>
+
+<ParamField body="effectiveDate" type="string" required>
+  Effective date for this rate (ISO 8601: YYYY-MM-DD)
+</ParamField>
+
+<ParamField body="rateType" type="enum" required>
+  Rate type: `Spot`, `Average`, `Historical`, `YearEnd`
+</ParamField>
+
+<ParamField body="source" type="enum" default="Manual">
+  Rate source: `Manual`, `ECB`, `FederalReserve`, `System`
+</ParamField>
+
+<Note>
+From currency and to currency must be different. The API will reject rates where `fromCurrency` equals `toCurrency`.
+</Note>
+
+## Bulk Create Exchange Rates
+
+Create multiple exchange rates in a single request.
+
+```bash POST /api/v1/exchange-rates/bulk
+curl -X POST "https://your-instance.accountability.app/api/v1/exchange-rates/bulk" \
+  -H "Authorization: Bearer your-session-token" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "rates": [
+      {
+        "organizationId": "org_123e4567-e89b-12d3-a456-426614174000",
+        "fromCurrency": "EUR",
+        "toCurrency": "USD",
+        "rate": "1.0850",
+        "effectiveDate": "2025-03-15",
+        "rateType": "Spot",
+        "source": "ECB"
+      },
+      {
+        "organizationId": "org_123e4567-e89b-12d3-a456-426614174000",
+        "fromCurrency": "GBP",
+        "toCurrency": "USD",
+        "rate": "1.2650",
+        "effectiveDate": "2025-03-15",
+        "rateType": "Spot",
+        "source": "ECB"
+      }
+    ]
+  }'
+```
+
+<ResponseExample>
+```json
+{
+  "created": [
+    { "id": "xr_123...", "fromCurrency": "EUR", "toCurrency": "USD", "rate": "1.0850" },
+    { "id": "xr_456...", "fromCurrency": "GBP", "toCurrency": "USD", "rate": "1.2650" }
+  ],
+  "count": 2
+}
+```
+</ResponseExample>
+
+<Note>
+Useful for importing exchange rates from external sources like ECB or Federal Reserve.
+</Note>
+
+## Delete Exchange Rate
+
+Delete an exchange rate. Rates used in transactions may not be deleted.
+
+```bash DELETE /api/v1/exchange-rates/{id}
+curl -X DELETE "https://your-instance.accountability.app/api/v1/exchange-rates/{rateId}" \
+  -H "Authorization: Bearer your-session-token"
+```
+
+<Warning>
+Rates that have been used in posted journal entries or consolidation runs cannot be deleted to preserve audit trail.
+</Warning>
+
+## Rate Queries
+
+### Get Rate for Date
+
+Get the exchange rate effective on a specific date.
+
+```bash GET /api/v1/exchange-rates/rate
+curl -X GET "https://your-instance.accountability.app/api/v1/exchange-rates/rate?fromCurrency=EUR&toCurrency=USD&effectiveDate=2025-03-15&rateType=Spot" \
+  -H "Authorization: Bearer your-session-token"
+```
+
+<ParamField query="fromCurrency" type="string" required>
+  From currency (ISO 4217 code)
+</ParamField>
+
+<ParamField query="toCurrency" type="string" required>
+  To currency (ISO 4217 code)
+</ParamField>
+
+<ParamField query="effectiveDate" type="string" required>
+  Date to query (ISO 8601: YYYY-MM-DD)
+</ParamField>
+
+<ParamField query="rateType" type="enum" required>
+  Rate type: `Spot`, `Average`, `Historical`, `YearEnd`
+</ParamField>
+
+<ResponseExample>
+```json
+{
+  "rate": {
+    "id": "xr_123e4567-e89b-12d3-a456-426614174000",
+    "fromCurrency": "EUR",
+    "toCurrency": "USD",
+    "rate": "1.0850",
+    "effectiveDate": "2025-03-15",
+    "rateType": "Spot",
+    "source": "ECB"
+  }
+}
+```
+</ResponseExample>
+
+### Get Latest Rate
+
+Get the most recent exchange rate for a currency pair.
+
+```bash GET /api/v1/exchange-rates/latest
+curl -X GET "https://your-instance.accountability.app/api/v1/exchange-rates/latest?fromCurrency=EUR&toCurrency=USD&rateType=Spot" \
+  -H "Authorization: Bearer your-session-token"
+```
+
+### Get Closest Rate
+
+Get the exchange rate closest to a specific date (fallback if exact date not available).
+
+```bash GET /api/v1/exchange-rates/closest
+curl -X GET "https://your-instance.accountability.app/api/v1/exchange-rates/closest?fromCurrency=EUR&toCurrency=USD&date=2025-03-15&rateType=Spot" \
+  -H "Authorization: Bearer your-session-token"
+```
+
+### Get Period Average Rate
+
+Get the average exchange rate for a fiscal period. Used for translating income statement items per ASC 830.
+
+```bash GET /api/v1/exchange-rates/period-average
+curl -X GET "https://your-instance.accountability.app/api/v1/exchange-rates/period-average?fromCurrency=EUR&toCurrency=USD&year=2025&period=3" \
+  -H "Authorization: Bearer your-session-token"
+```
+
+<ParamField query="fromCurrency" type="string" required>
+  From currency (ISO 4217 code)
+</ParamField>
+
+<ParamField query="toCurrency" type="string" required>
+  To currency (ISO 4217 code)
+</ParamField>
+
+<ParamField query="year" type="integer" required>
+  Fiscal year (e.g., 2025)
+</ParamField>
+
+<ParamField query="period" type="integer" required>
+  Fiscal period (1-13)
+</ParamField>
+
+### Get Period Closing Rate
+
+Get the closing exchange rate for a fiscal period. Used for translating balance sheet items per ASC 830.
+
+```bash GET /api/v1/exchange-rates/period-closing
+curl -X GET "https://your-instance.accountability.app/api/v1/exchange-rates/period-closing?fromCurrency=EUR&toCurrency=USD&year=2025&period=3" \
+  -H "Authorization: Bearer your-session-token"
+```
+
+## Currency Translation per ASC 830
+
+<AccordionGroup>
+  <Accordion title="Balance Sheet Translation">
+    **Use:** Period closing rate (`YearEnd` or `Spot` rate type)
+    
+    **Assets and Liabilities:**
+    - Translate at the closing rate as of the balance sheet date
+    - Example: EUR 100,000 asset at 1.0850 = USD 108,500
+    
+    **Equity:**
+    - Common Stock: Historical rate at issuance
+    - Retained Earnings: Computed from prior periods
+    
+    **Query:**
+    ```bash
+    GET /api/v1/exchange-rates/period-closing?fromCurrency=EUR&toCurrency=USD&year=2025&period=12
+    ```
+  </Accordion>
+  
+  <Accordion title="Income Statement Translation">
+    **Use:** Period average rate (`Average` rate type)
+    
+    **Revenue and Expenses:**
+    - Translate at the weighted average rate for the period
+    - Example: EUR 50,000 revenue at average rate 1.0800 = USD 54,000
+    
+    **Query:**
+    ```bash
+    GET /api/v1/exchange-rates/period-average?fromCurrency=EUR&toCurrency=USD&year=2025&period=3
+    ```
+  </Accordion>
+  
+  <Accordion title="Specific Transactions">
+    **Use:** Historical rate (`Historical` rate type)
+    
+    **Non-monetary items:**
+    - Fixed assets: Rate at acquisition date
+    - Equity investments: Rate at investment date
+    - Common stock: Rate at issuance date
+    
+    **Query:**
+    ```bash
+    GET /api/v1/exchange-rates/rate?fromCurrency=EUR&toCurrency=USD&effectiveDate=2023-06-15&rateType=Historical
+    ```
+  </Accordion>
+  
+  <Accordion title="Translation Adjustment">
+    The cumulative translation adjustment (CTA) captures the effect of exchange rate changes:
+    
+    **Calculation:**
+    1. Translate all assets and liabilities at closing rate
+    2. Translate equity at historical rates
+    3. Translate income statement at average rate
+    4. CTA = Balancing figure to make equation balance
+    
+    **Reporting:**
+    - Show as separate component of Other Comprehensive Income (OCI)
+    - Accumulates in Accumulated OCI in equity section
+  </Accordion>
+</AccordionGroup>
+
+## Error Responses
+
+<AccordionGroup>
+  <Accordion title="Exchange Rate Not Found (404)">
+    ```json
+    {
+      "_tag": "ExchangeRateNotFoundError",
+      "fromCurrency": "EUR",
+      "toCurrency": "USD",
+      "effectiveDate": "2025-03-15",
+      "rateType": "Spot",
+      "message": "No exchange rate found for EUR/USD on 2025-03-15"
+    }
+    ```
+  </Accordion>
+  
+  <Accordion title="Same Currency Error (400)">
+    ```json
+    {
+      "_tag": "SameCurrencyExchangeRateError",
+      "currency": "USD",
+      "message": "Cannot create exchange rate where from and to currency are the same (USD)"
+    }
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Best Practices
+
+<CardGroup cols={2}>
+  <Card title="Daily Rate Updates" icon="calendar-day">
+    Import daily spot rates from ECB or Federal Reserve for accurate currency translation.
+  </Card>
+  
+  <Card title="Period Average Rates" icon="chart-line">
+    Calculate and store period average rates at the end of each fiscal period for income statement translation.
+  </Card>
+  
+  <Card title="Historical Rates" icon="clock-rotate-left">
+    Record historical rates at the time of significant transactions (acquisitions, equity issuances) for proper balance sheet translation.
+  </Card>
+  
+  <Card title="Audit Trail" icon="file-invoice">
+    Never delete exchange rates that have been used in transactions. This preserves the audit trail and ensures historical reports remain accurate.
+  </Card>
+</CardGroup>

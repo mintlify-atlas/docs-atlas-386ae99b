@@ -1,0 +1,194 @@
+---
+title: Introduction
+description: Multi-company, multi-currency accounting SaaS built with Effect and TanStack Start
+---
+
+# Welcome to Accountability
+
+Accountability is a modern **multi-company, multi-currency accounting SaaS application** designed for organizations managing complex financial operations across multiple legal entities and jurisdictions.
+
+## What is Accountability?
+
+Accountability provides comprehensive accounting capabilities for organizations that need to:
+
+- Manage **multiple companies** within a single organization
+- Handle **multi-currency transactions** with automatic currency translation
+- Generate **consolidated financial statements** across parent-subsidiary relationships
+- Track **intercompany transactions** and eliminations
+- Maintain **US GAAP compliance** for financial reporting
+- Support **global operations** with companies in different jurisdictions
+
+## Key Features
+
+<CardGroup cols={2}>
+  <Card title="Multi-Company Management" icon="building">
+    Organize multiple legal entities under a single organization with hierarchical ownership structures and consolidation groups.
+  </Card>
+  
+  <Card title="Multi-Currency Support" icon="dollar-sign">
+    Full ASC 830 compliance with functional and reporting currency separation, automatic currency translation, and exchange rate management.
+  </Card>
+  
+  <Card title="Chart of Accounts" icon="list">
+    Flexible account structure with US GAAP classification (Assets, Liabilities, Equity, Revenue, Expenses) and standard numbering conventions.
+  </Card>
+  
+  <Card title="Journal Entries" icon="file-text">
+    Double-entry bookkeeping with multi-line entries, real-time balance validation, draft and approval workflows, and full audit trail.
+  </Card>
+  
+  <Card title="Fiscal Period Management" icon="calendar">
+    Automatic fiscal period calculation based on company fiscal year end, with support for 13 periods (including adjustment period).
+  </Card>
+  
+  <Card title="Financial Reports" icon="chart-bar">
+    Generate Balance Sheet, Income Statement (P&L), Cash Flow Statement, Trial Balance, and Statement of Changes in Equity for individual companies or consolidated groups.
+  </Card>
+  
+  <Card title="Consolidation Engine" icon="layers">
+    Automatic consolidation with intercompany elimination, currency translation, and support for full consolidation, equity method, and cost method.
+  </Card>
+  
+  <Card title="Authorization & Audit" icon="shield">
+    Role-based access control (RBAC) with fine-grained permissions, policy engine, and comprehensive audit logging for all financial transactions.
+  </Card>
+</CardGroup>
+
+## Technology Stack
+
+Accountability is built with modern, type-safe technologies:
+
+| Layer | Technology | Purpose |
+|-------|------------|----------|
+| **Backend** | [Effect](https://effect.website/) | Functional TypeScript for type-safe business logic |
+| **Frontend** | [TanStack Start](https://tanstack.com/start) | Full-stack React framework with SSR |
+| **Database** | PostgreSQL | Relational database with @effect/sql |
+| **API** | Effect HttpApi | Type-safe API with OpenAPI spec generation |
+| **Styling** | Tailwind CSS | Utility-first CSS framework |
+| **Testing** | Vitest + Playwright | Unit, integration, and E2E testing |
+
+## Architecture Principles
+
+### Functional Core
+
+The accounting core uses **Effect** for:
+- **Type safety**: Compile-time guarantees for business logic
+- **Error handling**: Structured error types with `Schema.TaggedError`
+- **Composability**: Services built from composable effects
+- **Testability**: 100% test coverage with Effect testing utilities
+
+### Layered Architecture
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                      FRONTEND (web)                         │
+│  React + TanStack Start + openapi-fetch + Tailwind          │
+│  NO Effect code - loaders for SSR, useState for UI          │
+└─────────────────────────────────────────────────────────────┘
+                              │
+                              │ HTTP (openapi-fetch client)
+                              ▼
+┌─────────────────────────────────────────────────────────────┐
+│                       BACKEND (api)                          │
+│  Effect HttpApi + HttpApiBuilder                             │
+│  Exports OpenAPI spec for client generation                  │
+└─────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────┐
+│                   PERSISTENCE + CORE                         │
+│  @effect/sql + PostgreSQL │ Effect business logic            │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### US GAAP Compliance
+
+Accountability implements key US GAAP standards:
+
+| Standard | Description | Implementation |
+|----------|-------------|-----------------|
+| **ASC 210** | Balance Sheet | Current/non-current classification, standard presentation |
+| **ASC 220** | Comprehensive Income | Income statement with OCI components |
+| **ASC 230** | Cash Flow Statement | Indirect method with operating/investing/financing classification |
+| **ASC 810** | Consolidation | Full consolidation, equity method, intercompany eliminations |
+| **ASC 830** | Foreign Currency | Functional currency model with translation/remeasurement |
+
+## Core Concepts
+
+### Organization Hierarchy
+
+- **Organization**: Top-level container with reporting currency
+- **Company**: Legal entity with functional currency and chart of accounts
+- **Consolidation Group**: Parent-subsidiary relationships for consolidated reporting
+- **Intercompany Relationships**: Trading partners for intercompany transaction tracking
+
+### Account Structure
+
+Accounts follow US GAAP numbering:
+
+| Range | Category | Examples |
+|-------|----------|----------|
+| 1000-1499 | Current Assets | Cash, Accounts Receivable, Inventory |
+| 1500-1999 | Non-Current Assets | Property, Equipment, Intangible Assets |
+| 2000-2499 | Current Liabilities | Accounts Payable, Accrued Expenses |
+| 2500-2999 | Non-Current Liabilities | Long-term Debt, Deferred Tax |
+| 3000-3999 | Equity | Share Capital, Retained Earnings |
+| 4000-4999 | Revenue | Sales Revenue, Service Revenue |
+| 5000-5999 | Cost of Sales | Direct Costs, COGS |
+| 6000-7999 | Operating Expenses | Salaries, Rent, Marketing |
+| 8000-8999 | Other Income/Expense | Interest, Foreign Exchange Gains/Losses |
+| 9000-9999 | Special | Intercompany Accounts, Eliminations |
+
+### Journal Entry Workflow
+
+1. **Draft**: Create multi-line entry with debits and credits
+2. **Validation**: System validates balance (debits = credits)
+3. **Approval**: Submit for approval (optional workflow)
+4. **Posted**: Record in general ledger with automatic fiscal period assignment
+5. **Immutable**: Posted entries cannot be modified (use reversing entries)
+
+## Get Started
+
+<CardGroup cols={2}>
+  <Card title="Quickstart" icon="rocket" href="/quickstart">
+    Create your first company and journal entry in 5 minutes
+  </Card>
+  
+  <Card title="Installation" icon="download" href="/installation">
+    Set up the development environment locally
+  </Card>
+</CardGroup>
+
+## Resources
+
+<CardGroup cols={3}>
+  <Card title="Effect Guide" icon="book">
+    Learn Effect patterns used in the backend
+  </Card>
+  
+  <Card title="Frontend Guide" icon="paintbrush">
+    React and TanStack Start patterns
+  </Card>
+  
+  <Card title="API Reference" icon="code">
+    OpenAPI-documented REST API
+  </Card>
+</CardGroup>
+
+## Design Principles
+
+<Note>
+  **Core Independence**: The accounting core is completely decoupled from UI/API layers, enabling different frontends and integrations.
+</Note>
+
+<Note>
+  **Immutability**: All accounting data is append-only. Corrections are made via reversing entries, maintaining a complete audit trail.
+</Note>
+
+<Note>
+  **Type Safety**: Leverage Effect's type system and Schema validation for compile-time guarantees and runtime validation.
+</Note>
+
+<Warning>
+  **100% Test Coverage**: All core business logic must have comprehensive test coverage. This is a hard requirement for maintaining data integrity.
+</Warning>

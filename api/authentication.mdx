@@ -1,0 +1,339 @@
+---
+title: Authentication
+description: Authentication methods, session management, and API token usage
+---
+
+# Authentication
+
+The Accountability API uses session-based authentication with bearer tokens. The API supports multiple authentication providers including local email/password, OAuth providers, and SAML.
+
+## Authentication Flow
+
+### 1. List Available Providers
+
+First, discover which authentication providers are enabled:
+
+```bash
+curl -X GET https://your-instance.accountability.app/api/auth/providers
+```
+
+<ResponseField name="providers" type="array">
+  Array of enabled authentication providers
+  
+  <Expandable title="ProviderMetadata properties">
+    <ResponseField name="type" type="string">
+      Provider type (e.g., "local", "google", "microsoft")
+    </ResponseField>
+    <ResponseField name="name" type="string">
+      Display name for the provider
+    </ResponseField>
+    <ResponseField name="supportsRegistration" type="boolean">
+      Whether this provider supports user registration
+    </ResponseField>
+    <ResponseField name="supportsPasswordLogin" type="boolean">
+      Whether this provider uses password-based authentication
+    </ResponseField>
+    <ResponseField name="oauthEnabled" type="boolean">
+      Whether this provider uses OAuth/SAML flow
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+### 2. Register New User (Local Provider)
+
+For local email/password authentication:
+
+```bash
+curl -X POST https://your-instance.accountability.app/api/auth/register \
+  -H "Content-Type: application/json" \
+  -d '{
+    "email": "user@example.com",
+    "password": "SecurePassword123!",
+    "displayName": "John Doe"
+  }'
+```
+
+<ParamField body="email" type="string" required>
+  User's email address
+</ParamField>
+
+<ParamField body="password" type="string" required>
+  Password (minimum 8 characters)
+</ParamField>
+
+<ParamField body="displayName" type="string" required>
+  User's display name
+</ParamField>
+
+<ResponseField name="user" type="AuthUser">
+  Created user details
+  
+  <Expandable title="AuthUser properties">
+    <ResponseField name="id" type="string">
+      Unique user identifier (UUID)
+    </ResponseField>
+    <ResponseField name="email" type="string">
+      User's email address
+    </ResponseField>
+    <ResponseField name="displayName" type="string">
+      User's display name
+    </ResponseField>
+    <ResponseField name="createdAt" type="string">
+      ISO 8601 timestamp
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+<ResponseField name="identities" type="array">
+  Array of linked authentication provider identities
+</ResponseField>
+
+### 3. Login
+
+**Local Provider Login:**
+
+```bash
+curl -X POST https://your-instance.accountability.app/api/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{
+    "provider": "local",
+    "credentials": {
+      "email": "user@example.com",
+      "password": "SecurePassword123!"
+    }
+  }'
+```
+
+<ResponseField name="token" type="string">
+  Session token (UUID) - use this for authenticated requests
+</ResponseField>
+
+<ResponseField name="user" type="AuthUser">
+  Authenticated user details
+</ResponseField>
+
+<ResponseField name="provider" type="string">
+  The provider used for authentication
+</ResponseField>
+
+<ResponseField name="expiresAt" type="string">
+  Session expiration timestamp (ISO 8601)
+</ResponseField>
+
+**OAuth Provider Login:**
+
+For OAuth providers, use a two-step flow:
+
+1. Get authorization URL:
+
+```bash
+curl -X GET https://your-instance.accountability.app/api/auth/authorize/google
+```
+
+Response:
+```json
+{
+  "redirectUrl": "https://accounts.google.com/o/oauth2/v2/auth?client_id=...",
+  "state": "random-csrf-token"
+}
+```
+
+2. Redirect user to `redirectUrl`. After authorization, the provider redirects back with a code.
+
+3. Exchange code for session:
+
+```bash
+curl -X POST https://your-instance.accountability.app/api/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{
+    "provider": "google",
+    "credentials": {
+      "code": "authorization-code-from-provider",
+      "state": "random-csrf-token"
+    }
+  }'
+```
+
+## Using Session Tokens
+
+Include the session token in the `Authorization` header with Bearer scheme:
+
+```bash
+curl -X GET https://your-instance.accountability.app/api/v1/accounts \
+  -H "Authorization: Bearer your-session-token-here" \
+  -H "Content-Type: application/json"
+```
+
+## Session Management
+
+### Get Current User
+
+Retrieve details for the authenticated user:
+
+```bash
+curl -X GET https://your-instance.accountability.app/api/auth/me \
+  -H "Authorization: Bearer your-session-token"
+```
+
+### Update Profile
+
+Update the current user's profile:
+
+```bash
+curl -X PUT https://your-instance.accountability.app/api/auth/me \
+  -H "Authorization: Bearer your-session-token" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "displayName": "Jane Doe"
+  }'
+```
+
+### Refresh Session
+
+Extend the session expiration:
+
+```bash
+curl -X POST https://your-instance.accountability.app/api/auth/refresh \
+  -H "Authorization: Bearer your-session-token"
+```
+
+Response:
+```json
+{
+  "token": "new-session-token",
+  "expiresAt": "2025-03-16T14:30:00Z"
+}
+```
+
+### Logout
+
+Invalidate the current session:
+
+```bash
+curl -X POST https://your-instance.accountability.app/api/auth/logout \
+  -H "Authorization: Bearer your-session-token"
+```
+
+## Multi-Provider Identity Linking
+
+Users can link multiple authentication providers to a single account.
+
+### Link Additional Provider
+
+1. Initiate linking:
+
+```bash
+curl -X POST https://your-instance.accountability.app/api/auth/link/github \
+  -H "Authorization: Bearer your-session-token"
+```
+
+Response:
+```json
+{
+  "redirectUrl": "https://github.com/login/oauth/authorize?client_id=...",
+  "state": "random-csrf-token"
+}
+```
+
+2. User authorizes on the provider's site and is redirected back.
+
+3. The callback automatically completes the linking process.
+
+### Unlink Provider
+
+Remove a linked provider identity:
+
+```bash
+curl -X DELETE https://your-instance.accountability.app/api/auth/identities/{identityId} \
+  -H "Authorization: Bearer your-session-token"
+```
+
+<Warning>
+Users must maintain at least one linked identity. The API will reject attempts to unlink the last identity.
+</Warning>
+
+## Change Password
+
+For users with local authentication:
+
+```bash
+curl -X POST https://your-instance.accountability.app/api/auth/change-password \
+  -H "Authorization: Bearer your-session-token" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "currentPassword": "OldPassword123!",
+    "newPassword": "NewSecurePassword456!"
+  }'
+```
+
+<ParamField body="currentPassword" type="string" required>
+  User's current password for verification
+</ParamField>
+
+<ParamField body="newPassword" type="string" required>
+  New password (minimum 8 characters)
+</ParamField>
+
+## Error Responses
+
+### Invalid Credentials (401)
+
+```json
+{
+  "_tag": "AuthUnauthorizedError",
+  "message": "Invalid credentials or authentication required"
+}
+```
+
+### Session Expired (401)
+
+```json
+{
+  "_tag": "SessionInvalidError",
+  "message": "Session is invalid or expired"
+}
+```
+
+### User Already Exists (409)
+
+```json
+{
+  "_tag": "UserExistsError",
+  "email": "user@example.com",
+  "message": "A user with this email already exists"
+}
+```
+
+### Weak Password (400)
+
+```json
+{
+  "_tag": "PasswordWeakError",
+  "message": "Password does not meet requirements",
+  "requirements": [
+    "Minimum 8 characters",
+    "At least one uppercase letter",
+    "At least one number"
+  ]
+}
+```
+
+## Security Best Practices
+
+<AccordionGroup>
+  <Accordion title="Store tokens securely">
+    Never expose session tokens in client-side code, URLs, or logs. Use secure HTTP-only cookies when possible.
+  </Accordion>
+  
+  <Accordion title="Refresh tokens proactively">
+    Refresh sessions before they expire to maintain uninterrupted access.
+  </Accordion>
+  
+  <Accordion title="Logout on user action">
+    Always call the logout endpoint when users explicitly sign out to invalidate the session server-side.
+  </Accordion>
+  
+  <Accordion title="Use HTTPS">
+    Always use HTTPS in production to encrypt authentication credentials in transit.
+  </Accordion>
+</AccordionGroup>

@@ -1,0 +1,752 @@
+---
+title: Domain Model
+description: Business entities, value objects, and domain logic in the Accountability core package
+---
+
+## Overview
+
+The domain model represents the core accounting concepts and business rules. All domain entities live in `packages/core/src/` and are built using **Effect Schema** for type safety and validation.
+
+<Info>
+  The domain model has **zero dependencies** on infrastructure (no database, no HTTP, no external libraries). It's pure business logic.
+</Info>
+
+## Domain Structure
+
+The domain is organized into bounded contexts:
+
+```
+Organization (tenant)
+  └── Company (legal entity)
+      ├── Chart of Accounts
+      │   └── Account
+      ├── Journal Entries
+      │   ├── JournalEntry
+      │   └── JournalEntryLine
+      ├── Fiscal Periods
+      │   ├── FiscalYear
+      │   └── FiscalPeriod
+      └── Reports
+          ├── Balance Sheet
+          ├── Income Statement
+          ├── Cash Flow Statement
+          └── Equity Statement
+
+Consolidation (multi-company)
+  ├── ConsolidationGroup
+  ├── IntercompanyTransaction
+  └── EliminationRule
+
+Currency
+  ├── Currency
+  └── ExchangeRate
+
+Authentication
+  ├── AuthUser
+  └── Session
+
+Authorization
+  └── AuthorizationPolicy
+```
+
+## Core Entities
+
+### Organization
+
+**Purpose**: Top-level tenant that owns companies and defines reporting currency.
+
+```typescript
+export const OrganizationId = Schema.NonEmptyTrimmedString.pipe(
+  Schema.brand("OrganizationId")
+)
+export type OrganizationId = typeof OrganizationId.Type
+
+export class Organization extends Schema.Class<Organization>("Organization")({
+  id: OrganizationId,
+  name: Schema.NonEmptyTrimmedString,
+  reportingCurrency: CurrencyCode, // USD, EUR, GBP, etc.
+  createdAt: Timestamp
+}) {
+  static make(data: {
+    name: string
+    reportingCurrency: CurrencyCode
+  }): Organization {
+    return Organization.make({
+      id: OrganizationId.make(generateUUID()),
+      name: data.name,
+      reportingCurrency: data.reportingCurrency,
+      createdAt: Timestamp.now()
+    })
+  }
+}
+```
+
+### Company
+
+**Purpose**: Legal entity with its own chart of accounts, functional currency, and fiscal calendar.
+
+```typescript
+export const CompanyId = Schema.NonEmptyTrimmedString.pipe(
+  Schema.brand("CompanyId")
+)
+export type CompanyId = typeof CompanyId.Type
+
+export const CompanyType = Schema.Literal(
+  "Standalone",
+  "Parent",
+  "Subsidiary",
+  "Joint Venture"
+)
+export type CompanyType = typeof CompanyType.Type
+
+export class Company extends Schema.Class<Company>("Company")({
+  id: CompanyId,
+  organizationId: OrganizationId,
+  name: Schema.NonEmptyTrimmedString,
+  legalName: Schema.NonEmptyTrimmedString,
+  companyType: CompanyType,
+  
+  // Currency settings
+  functionalCurrency: CurrencyCode,
+  reportingCurrency: CurrencyCode,
+  
+  // Jurisdiction
+  jurisdiction: JurisdictionCode,
+  taxId: Schema.Option(Schema.String),
+  
+  // Fiscal settings
+  fiscalYearEnd: Schema.Struct({
+    month: Schema.Number.pipe(Schema.between(1, 12)),
+    day: Schema.Number.pipe(Schema.between(1, 31))
+  }),
+  
+  // Consolidation
+  parentCompanyId: Schema.Option(CompanyId),
+  ownershipPercentage: Schema.Option(Percentage),
+  
+  // Status
+  isActive: Schema.Boolean,
+  createdAt: Timestamp,
+  updatedAt: Timestamp
+}) {
+  get isTopLevel(): boolean {
+    return Option.isNone(this.parentCompanyId)
+  }
+  
+  get requiresConsolidation(): boolean {
+    return this.companyType === "Parent"
+  }
+}
+```
+
+### Account
+
+**Purpose**: Individual account in the chart of accounts.
+
+```typescript
+export const AccountId = Schema.NonEmptyTrimmedString.pipe(
+  Schema.brand("AccountId")
+)
+export type AccountId = typeof AccountId.Type
+
+export const AccountNumber = Schema.String.pipe(
+  Schema.pattern(/^[0-9]{4,10}$/),
+  Schema.brand("AccountNumber")
+)
+export type AccountNumber = typeof AccountNumber.Type
+
+export const AccountType = Schema.Literal(
+  "Asset",
+  "Liability",
+  "Equity",
+  "Revenue",
+  "Expense"
+)
+export type AccountType = typeof AccountType.Type
+
+export const AccountCategory = Schema.Literal(
+  // Assets
+  "CurrentAsset",
+  "NonCurrentAsset",
+  "FixedAsset",
+  "IntangibleAsset",
+  // Liabilities
+  "CurrentLiability",
+  "NonCurrentLiability",
+  // Equity
+  "ContributedCapital",
+  "RetainedEarnings",
+  "OtherComprehensiveIncome",
+  "TreasuryStock",
+  // Revenue
+  "OperatingRevenue",
+  "OtherRevenue",
+  // Expenses
+  "CostOfGoodsSold",
+  "OperatingExpense",
+  "DepreciationAmortization",
+  "InterestExpense",
+  "TaxExpense",
+  "OtherExpense"
+)
+export type AccountCategory = typeof AccountCategory.Type
+
+export const NormalBalance = Schema.Literal("Debit", "Credit")
+export type NormalBalance = typeof NormalBalance.Type
+
+export class Account extends Schema.Class<Account>("Account")({
+  id: AccountId,
+  companyId: CompanyId,
+  accountNumber: AccountNumber,
+  name: Schema.NonEmptyTrimmedString,
+  description: Schema.Option(Schema.String),
+  
+  // Classification
+  accountType: AccountType,
+  category: AccountCategory,
+  normalBalance: NormalBalance,
+  
+  // Hierarchy
+  parentAccountId: Schema.Option(AccountId),
+  level: Schema.Number.pipe(Schema.int(), Schema.greaterThanOrEqualTo(0)),
+  
+  // Behavior
+  isActive: Schema.Boolean,
+  allowManualEntries: Schema.Boolean,
+  requiresDepartment: Schema.Boolean,
+  requiresProject: Schema.Boolean,
+  
+  // Currency
+  currencyCode: Schema.Option(CurrencyCode),
+  
+  createdAt: Timestamp,
+  updatedAt: Timestamp
+}) {
+  get isBalanceSheet(): boolean {
+    return ["Asset", "Liability", "Equity"].includes(this.accountType)
+  }
+  
+  get isProfitLoss(): boolean {
+    return ["Revenue", "Expense"].includes(this.accountType)
+  }
+  
+  get isHeader(): boolean {
+    return !this.allowManualEntries
+  }
+  
+  get isLeaf(): boolean {
+    return this.allowManualEntries
+  }
+}
+```
+
+### JournalEntry
+
+**Purpose**: Transaction that records debits and credits to accounts.
+
+```typescript
+export const JournalEntryId = Schema.NonEmptyTrimmedString.pipe(
+  Schema.brand("JournalEntryId")
+)
+export type JournalEntryId = typeof JournalEntryId.Type
+
+export const EntryStatus = Schema.Literal(
+  "Draft",
+  "PendingApproval",
+  "Approved",
+  "Posted",
+  "Void"
+)
+export type EntryStatus = typeof EntryStatus.Type
+
+export const EntryType = Schema.Literal(
+  "Standard",
+  "Adjusting",
+  "Closing",
+  "Reversing",
+  "Reclassification"
+)
+export type EntryType = typeof EntryType.Type
+
+export class JournalEntry extends Schema.Class<JournalEntry>("JournalEntry")({
+  id: JournalEntryId,
+  companyId: CompanyId,
+  
+  // Identification
+  entryNumber: Schema.String,
+  reference: Schema.Option(Schema.String),
+  description: Schema.String,
+  
+  // Dates
+  entryDate: LocalDate,
+  postingDate: Schema.Option(LocalDate),
+  
+  // Classification
+  entryType: EntryType,
+  status: EntryStatus,
+  
+  // Fiscal period
+  fiscalPeriodId: FiscalPeriodId,
+  
+  // Currency
+  currencyCode: CurrencyCode,
+  
+  // Audit
+  createdBy: AuthUserId,
+  approvedBy: Schema.Option(AuthUserId),
+  postedBy: Schema.Option(AuthUserId),
+  createdAt: Timestamp,
+  updatedAt: Timestamp
+}) {
+  canTransitionTo(newStatus: EntryStatus): boolean {
+    const transitions: Record<EntryStatus, EntryStatus[]> = {
+      Draft: ["PendingApproval", "Void"],
+      PendingApproval: ["Approved", "Draft", "Void"],
+      Approved: ["Posted", "Draft"],
+      Posted: ["Void"],
+      Void: []
+    }
+    return transitions[this.status].includes(newStatus)
+  }
+  
+  get isPosted(): boolean {
+    return this.status === "Posted"
+  }
+  
+  get isEditable(): boolean {
+    return ["Draft", "PendingApproval"].includes(this.status)
+  }
+}
+
+export class JournalEntryLine extends Schema.Class<JournalEntryLine>("JournalEntryLine")({
+  id: JournalEntryLineId,
+  journalEntryId: JournalEntryId,
+  lineNumber: Schema.Number.pipe(Schema.int(), Schema.positive()),
+  
+  // Account
+  accountId: AccountId,
+  
+  // Amounts
+  debit: MonetaryAmount,
+  credit: MonetaryAmount,
+  
+  // Dimensions (optional)
+  departmentId: Schema.Option(DepartmentId),
+  projectId: Schema.Option(ProjectId),
+  
+  // Multi-currency
+  currencyCode: CurrencyCode,
+  exchangeRate: Schema.Option(Schema.Number),
+  functionalCurrencyDebit: MonetaryAmount,
+  functionalCurrencyCredit: MonetaryAmount,
+  
+  // Description
+  description: Schema.Option(Schema.String),
+  
+  createdAt: Timestamp
+}) {
+  get amount(): MonetaryAmount {
+    return this.debit.pipe(
+      MonetaryAmount.add(this.credit)
+    )
+  }
+  
+  get isDebit(): boolean {
+    return MonetaryAmount.greaterThan(this.debit, MonetaryAmount.zero)
+  }
+  
+  get isCredit(): boolean {
+    return MonetaryAmount.greaterThan(this.credit, MonetaryAmount.zero)
+  }
+}
+```
+
+### FiscalPeriod
+
+**Purpose**: Time period for financial reporting (monthly, quarterly, yearly).
+
+```typescript
+export const FiscalPeriodId = Schema.NonEmptyTrimmedString.pipe(
+  Schema.brand("FiscalPeriodId")
+)
+export type FiscalPeriodId = typeof FiscalPeriodId.Type
+
+export const FiscalPeriodType = Schema.Literal(
+  "Monthly",
+  "Quarterly",
+  "Yearly",
+  "YearEndAdjustment" // Period 13
+)
+export type FiscalPeriodType = typeof FiscalPeriodType.Type
+
+export const FiscalPeriodStatus = Schema.Literal(
+  "Open",
+  "Closed",
+  "Locked"
+)
+export type FiscalPeriodStatus = typeof FiscalPeriodStatus.Type
+
+export class FiscalPeriod extends Schema.Class<FiscalPeriod>("FiscalPeriod")({
+  id: FiscalPeriodId,
+  companyId: CompanyId,
+  fiscalYearId: FiscalYearId,
+  
+  // Period info
+  periodNumber: Schema.Number.pipe(Schema.int(), Schema.between(1, 13)),
+  periodType: FiscalPeriodType,
+  name: Schema.String, // "January 2024", "Q1 2024", "FY 2024"
+  
+  // Dates
+  startDate: LocalDate,
+  endDate: LocalDate,
+  
+  // Status
+  status: FiscalPeriodStatus,
+  closedBy: Schema.Option(AuthUserId),
+  closedAt: Schema.Option(Timestamp),
+  
+  createdAt: Timestamp
+}) {
+  get isOpen(): boolean {
+    return this.status === "Open"
+  }
+  
+  get isClosed(): boolean {
+    return this.status === "Closed" || this.status === "Locked"
+  }
+  
+  get isYearEndAdjustment(): boolean {
+    return this.periodType === "YearEndAdjustment"
+  }
+  
+  containsDate(date: LocalDate): boolean {
+    return LocalDate.greaterThanOrEqualTo(date, this.startDate) &&
+           LocalDate.lessThanOrEqualTo(date, this.endDate)
+  }
+}
+```
+
+### Currency and ExchangeRate
+
+```typescript
+export const CurrencyCode = Schema.Literal(
+  "USD", "EUR", "GBP", "JPY", "CAD", "AUD", "CHF",
+  // ... all ISO 4217 currency codes
+)
+export type CurrencyCode = typeof CurrencyCode.Type
+
+export class Currency extends Schema.Class<Currency>("Currency")({
+  code: CurrencyCode,
+  name: Schema.String,
+  symbol: Schema.String,
+  decimalPlaces: Schema.Number.pipe(Schema.int(), Schema.between(0, 4)),
+  isActive: Schema.Boolean
+}) {}
+
+export const RateType = Schema.Literal(
+  "Spot",      // Current market rate
+  "Average",   // Period average rate
+  "Historical",// Transaction date rate
+  "Closing"    // End of period rate
+)
+export type RateType = typeof RateType.Type
+
+export class ExchangeRate extends Schema.Class<ExchangeRate>("ExchangeRate")({
+  id: ExchangeRateId,
+  organizationId: OrganizationId,
+  
+  fromCurrency: CurrencyCode,
+  toCurrency: CurrencyCode,
+  rate: Schema.Number.pipe(Schema.positive()),
+  
+  effectiveDate: LocalDate,
+  rateType: RateType,
+  
+  source: Schema.Literal("Manual", "Import", "API"),
+  createdAt: Timestamp
+}) {
+  convert(amount: MonetaryAmount): MonetaryAmount {
+    return MonetaryAmount.multiply(amount, this.rate)
+  }
+  
+  inverse(): ExchangeRate {
+    return ExchangeRate.make({
+      ...this,
+      fromCurrency: this.toCurrency,
+      toCurrency: this.fromCurrency,
+      rate: 1 / this.rate
+    })
+  }
+}
+```
+
+## Value Objects
+
+### MonetaryAmount
+
+**Purpose**: Precise decimal arithmetic for money (uses BigDecimal under the hood).
+
+```typescript
+export const MonetaryAmount = Schema.Number.pipe(
+  Schema.brand("MonetaryAmount")
+)
+export type MonetaryAmount = typeof MonetaryAmount.Type
+
+export namespace MonetaryAmount {
+  export const zero: MonetaryAmount = MonetaryAmount.make(0)
+  
+  export const add = (a: MonetaryAmount, b: MonetaryAmount): MonetaryAmount =>
+    MonetaryAmount.make(a + b)
+  
+  export const subtract = (a: MonetaryAmount, b: MonetaryAmount): MonetaryAmount =>
+    MonetaryAmount.make(a - b)
+  
+  export const multiply = (a: MonetaryAmount, factor: number): MonetaryAmount =>
+    MonetaryAmount.make(a * factor)
+  
+  export const greaterThan = (a: MonetaryAmount, b: MonetaryAmount): boolean =>
+    a > b
+  
+  export const equals = (a: MonetaryAmount, b: MonetaryAmount): boolean =>
+    Math.abs(a - b) < 0.01 // 1 cent tolerance
+}
+```
+
+### LocalDate
+
+**Purpose**: Date without time zone (YYYY-MM-DD format).
+
+```typescript
+export const LocalDate = Schema.String.pipe(
+  Schema.pattern(/^\d{4}-\d{2}-\d{2}$/),
+  Schema.brand("LocalDate")
+)
+export type LocalDate = typeof LocalDate.Type
+
+export namespace LocalDate {
+  export const today = (): LocalDate =>
+    LocalDate.make(new Date().toISOString().split('T')[0])
+  
+  export const fromDate = (date: Date): LocalDate =>
+    LocalDate.make(date.toISOString().split('T')[0])
+  
+  export const toDate = (localDate: LocalDate): Date =>
+    new Date(localDate + 'T00:00:00Z')
+  
+  export const greaterThan = (a: LocalDate, b: LocalDate): boolean =>
+    a > b
+  
+  export const between = (
+    date: LocalDate,
+    start: LocalDate,
+    end: LocalDate
+  ): boolean =>
+    date >= start && date <= end
+}
+```
+
+### Percentage
+
+```typescript
+export const Percentage = Schema.Number.pipe(
+  Schema.greaterThanOrEqualTo(0),
+  Schema.lessThanOrEqualTo(100),
+  Schema.brand("Percentage")
+)
+export type Percentage = typeof Percentage.Type
+
+export namespace Percentage {
+  export const toDecimal = (p: Percentage): number => p / 100
+  export const fromDecimal = (d: number): Percentage => Percentage.make(d * 100)
+}
+```
+
+## Domain Services
+
+### AccountValidation
+
+**Purpose**: Validate account data and business rules.
+
+```typescript
+export class AccountValidation {
+  static validateAccountNumber(
+    accountNumber: AccountNumber,
+    accountType: AccountType
+  ): Effect.Effect<void, ValidationError> {
+    const ranges: Record<AccountType, [number, number]> = {
+      Asset: [1000, 1999],
+      Liability: [2000, 2999],
+      Equity: [3000, 3999],
+      Revenue: [4000, 4999],
+      Expense: [5000, 9999]
+    }
+    
+    const num = parseInt(accountNumber)
+    const [min, max] = ranges[accountType]
+    
+    if (num < min || num > max) {
+      return Effect.fail(new ValidationError({
+        message: `Account number ${accountNumber} is invalid for type ${accountType}`
+      }))
+    }
+    
+    return Effect.void
+  }
+}
+```
+
+### JournalEntryService
+
+**Purpose**: Business logic for journal entries.
+
+```typescript
+export interface JournalEntryService {
+  readonly validateBalanced: (
+    lines: ReadonlyArray<JournalEntryLine>
+  ) => Effect.Effect<void, ValidationError>
+  
+  readonly post: (
+    entry: JournalEntry
+  ) => Effect.Effect<JournalEntry, JournalEntryError>
+}
+
+export class JournalEntryService extends Context.Tag("JournalEntryService")<
+  JournalEntryService,
+  JournalEntryService
+>() {}
+
+// Implementation
+const make = Effect.gen(function* () {
+  const validateBalanced = (lines: ReadonlyArray<JournalEntryLine>) =>
+    Effect.gen(function* () {
+      const totalDebits = lines.reduce(
+        (sum, line) => MonetaryAmount.add(sum, line.debit),
+        MonetaryAmount.zero
+      )
+      
+      const totalCredits = lines.reduce(
+        (sum, line) => MonetaryAmount.add(sum, line.credit),
+        MonetaryAmount.zero
+      )
+      
+      if (!MonetaryAmount.equals(totalDebits, totalCredits)) {
+        return yield* Effect.fail(new ValidationError({
+          message: `Entry is not balanced: debits=${totalDebits}, credits=${totalCredits}`
+        }))
+      }
+    })
+  
+  const post = (entry: JournalEntry) =>
+    Effect.gen(function* () {
+      if (!entry.canTransitionTo("Posted")) {
+        return yield* Effect.fail(new InvalidStatusTransition({
+          from: entry.status,
+          to: "Posted"
+        }))
+      }
+      
+      return JournalEntry.make({
+        ...entry,
+        status: "Posted",
+        postingDate: Option.some(LocalDate.today())
+      })
+    })
+  
+  return { validateBalanced, post }
+})
+
+export const JournalEntryServiceLive = Layer.effect(JournalEntryService, make)
+```
+
+## Domain Errors
+
+All domain errors use `Schema.TaggedError`:
+
+```typescript
+export class AccountNotFound extends Schema.TaggedError<AccountNotFound>()()
+  "AccountNotFound",
+  { accountId: AccountId }
+) {
+  get message(): string {
+    return `Account not found: ${this.accountId}`
+  }
+}
+
+export class ValidationError extends Schema.TaggedError<ValidationError>()()
+  "ValidationError",
+  { message: Schema.String }
+) {}
+
+export class PeriodClosedError extends Schema.TaggedError<PeriodClosedError>()()
+  "PeriodClosedError",
+  { periodId: FiscalPeriodId, periodName: Schema.String }
+) {
+  get message(): string {
+    return `Cannot post entries to closed period: ${this.periodName}`
+  }
+}
+```
+
+## Business Rules
+
+### Double-Entry Bookkeeping
+
+**Rule**: Every journal entry must have equal debits and credits.
+
+```typescript
+const validateBalanced = (lines: ReadonlyArray<JournalEntryLine>) => {
+  const debits = lines.reduce((sum, l) => sum + l.debit, 0)
+  const credits = lines.reduce((sum, l) => sum + l.credit, 0)
+  
+  if (Math.abs(debits - credits) > 0.01) {
+    return Effect.fail(new EntryNotBalanced({ debits, credits }))
+  }
+  
+  return Effect.void
+}
+```
+
+### Period Locking
+
+**Rule**: Cannot post entries to closed or locked periods.
+
+```typescript
+const validatePeriodOpen = (period: FiscalPeriod) => {
+  if (period.status !== "Open") {
+    return Effect.fail(new PeriodClosedError({
+      periodId: period.id,
+      periodName: period.name
+    }))
+  }
+  return Effect.void
+}
+```
+
+### Account Type Validation
+
+**Rule**: Account numbers must match account type ranges.
+
+```typescript
+const accountRanges: Record<AccountType, [number, number]> = {
+  Asset: [1000, 1999],
+  Liability: [2000, 2999],
+  Equity: [3000, 3999],
+  Revenue: [4000, 4999],
+  Expense: [5000, 9999]
+}
+
+const validateAccountNumber = (num: number, type: AccountType) => {
+  const [min, max] = accountRanges[type]
+  if (num < min || num > max) {
+    return Effect.fail(new InvalidAccountNumber({ num, type }))
+  }
+  return Effect.void
+}
+```
+
+## Next Steps
+
+- [Persistence](/architecture/persistence) - How domain entities are persisted
+- [Effect Framework](/architecture/effect-framework) - Effect patterns used in services
+- [Error Handling](/architecture/error-handling) - Domain error patterns
+- [Testing](/architecture/testing) - Testing domain logic

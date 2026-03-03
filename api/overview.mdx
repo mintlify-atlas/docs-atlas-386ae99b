@@ -1,0 +1,213 @@
+---
+title: API Overview
+description: Introduction to the Accountability API, base URL, authentication, and general patterns
+---
+
+# API Overview
+
+The Accountability API provides a comprehensive RESTful interface for managing multi-company, multi-currency accounting operations. Built with Effect's HttpApi framework, the API offers type-safe endpoints with automatic OpenAPI documentation generation.
+
+## Base URL
+
+All API requests should be made to:
+
+```
+https://your-instance.accountability.app/api
+```
+
+For local development:
+
+```
+http://localhost:3000/api
+```
+
+## API Version
+
+The current API version is `v1`. All versioned endpoints use the `/api/v1` prefix:
+
+- `/api/v1/accounts`
+- `/api/v1/journal-entries`
+- `/api/v1/companies`
+- etc.
+
+Unversioned endpoints:
+- `/api/health` - Health check (public)
+- `/api/auth` - Authentication endpoints (mixed public/protected)
+
+## General Patterns
+
+### HTTP Methods
+
+The API follows standard RESTful conventions:
+
+- `GET` - Retrieve resources
+- `POST` - Create new resources or initiate actions
+- `PUT` - Update existing resources (full update)
+- `DELETE` - Delete or deactivate resources
+
+### Response Format
+
+All responses use JSON format with proper Content-Type headers:
+
+```json
+Content-Type: application/json
+```
+
+### Pagination
+
+List endpoints support pagination using `limit` and `offset` query parameters:
+
+```http
+GET /api/v1/accounts?limit=50&offset=0
+```
+
+<ParamField query="limit" type="integer" default="50">
+  Maximum number of items to return (max: 100)
+</ParamField>
+
+<ParamField query="offset" type="integer" default="0">
+  Number of items to skip before starting to return results
+</ParamField>
+
+Paginated responses include metadata:
+
+```json
+{
+  "items": [...],
+  "total": 150,
+  "limit": 50,
+  "offset": 0
+}
+```
+
+### Date and Time Formats
+
+**Dates** use ISO 8601 format (YYYY-MM-DD):
+
+```json
+"transactionDate": "2025-03-15"
+```
+
+**Timestamps** use ISO 8601 UTC format:
+
+```json
+"createdAt": "2025-03-15T14:30:00Z"
+```
+
+### Currency Amounts
+
+Monetary amounts use string representation to preserve precision:
+
+```json
+{
+  "amount": {
+    "value": "1234.56",
+    "currency": "USD"
+  }
+}
+```
+
+### Error Responses
+
+Errors follow a consistent structure with HTTP status codes and error details:
+
+```json
+{
+  "_tag": "AccountNotFoundError",
+  "message": "Account with ID '123e4567-e89b-12d3-a456-426614174000' not found",
+  "accountId": "123e4567-e89b-12d3-a456-426614174000"
+}
+```
+
+Common HTTP status codes:
+
+- `200 OK` - Successful request
+- `201 Created` - Resource successfully created
+- `204 No Content` - Successful request with no response body
+- `400 Bad Request` - Invalid request parameters
+- `401 Unauthorized` - Authentication required or invalid credentials
+- `403 Forbidden` - Insufficient permissions
+- `404 Not Found` - Resource not found
+- `409 Conflict` - Resource conflict (e.g., duplicate name)
+
+### Query Parameters
+
+Query parameters support filtering, sorting, and pagination:
+
+**Filtering by status:**
+```http
+GET /api/v1/accounts?isActive=true
+```
+
+**Filtering by date range:**
+```http
+GET /api/v1/journal-entries?fromDate=2025-01-01&toDate=2025-03-31
+```
+
+**Multiple filters:**
+```http
+GET /api/v1/accounts?accountType=Asset&isPostable=true&limit=100
+```
+
+### Optional Fields
+
+Fields marked as optional in request schemas can be:
+- Omitted entirely
+- Set to `null` to explicitly clear a value (for updates)
+
+Example update request:
+
+```json
+{
+  "name": "Updated Account Name",
+  "description": null,
+  "isActive": true
+}
+```
+
+### Idempotency
+
+`PUT` and `DELETE` operations are idempotent - making the same request multiple times produces the same result.
+
+`POST` operations are generally not idempotent and will create new resources on each call.
+
+## Health Check
+
+Check API availability (no authentication required):
+
+```bash
+curl https://your-instance.accountability.app/api/health
+```
+
+Response:
+
+```json
+{
+  "status": "ok",
+  "timestamp": "2025-03-15T14:30:00Z",
+  "version": "0.0.1"
+}
+```
+
+## Rate Limiting
+
+<Note>
+Rate limiting policies are configured per deployment. Contact your system administrator for specific limits.
+</Note>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Authentication" icon="lock" href="/api/authentication">
+    Learn how to authenticate API requests
+  </Card>
+  <Card title="Accounts" icon="chart-tree-map" href="/api/accounts">
+    Manage the Chart of Accounts
+  </Card>
+  <Card title="Journal Entries" icon="book" href="/api/journal-entries">
+    Create and manage journal entries
+  </Card>
+  <Card title="Reports" icon="chart-line" href="/api/reports">
+    Generate financial reports
+  </Card>
+</CardGroup>

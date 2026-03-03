@@ -1,0 +1,466 @@
+---
+title: Journal Entries API
+description: Create and manage journal entries for double-entry bookkeeping
+---
+
+# Journal Entries API
+
+The Journal Entries API provides comprehensive endpoints for creating and managing journal entries with support for multi-level approval workflows, posting, and reversal.
+
+## Base Path
+
+```
+/api/v1/journal-entries
+```
+
+All endpoints require authentication with a valid session token.
+
+## Entry Workflow
+
+Journal entries follow a structured workflow:
+
+1. **Draft** - Initial creation, can be edited or deleted
+2. **Pending Approval** - Submitted for review (optional)
+3. **Approved** - Ready for posting
+4. **Posted** - Locked, affects account balances
+5. **Reversed** - Posted entry that has been reversed
+
+## List Journal Entries
+
+Retrieve a paginated list of journal entries with comprehensive filtering.
+
+```bash GET /api/v1/journal-entries
+curl -X GET "https://your-instance.accountability.app/api/v1/journal-entries?organizationId={orgId}&companyId={companyId}&status=Posted&limit=50" \
+  -H "Authorization: Bearer your-session-token"
+```
+
+<ParamField query="organizationId" type="string" required>
+  Organization UUID
+</ParamField>
+
+<ParamField query="companyId" type="string" required>
+  Company UUID
+</ParamField>
+
+<ParamField query="status" type="enum">
+  Filter by status: `Draft`, `PendingApproval`, `Approved`, `Posted`, `Reversed`
+</ParamField>
+
+<ParamField query="entryType" type="enum">
+  Filter by type: `Standard`, `Adjusting`, `Closing`, `Reversing`, `Recurring`
+</ParamField>
+
+<ParamField query="sourceModule" type="enum">
+  Filter by source: `GeneralLedger`, `AccountsPayable`, `AccountsReceivable`, `Payroll`, `Inventory`, `FixedAssets`
+</ParamField>
+
+<ParamField query="fiscalYear" type="integer">
+  Filter by fiscal year (e.g., 2025)
+</ParamField>
+
+<ParamField query="fiscalPeriod" type="integer">
+  Filter by fiscal period (1-13)
+</ParamField>
+
+<ParamField query="fromDate" type="string">
+  Filter by transaction date start (ISO 8601: YYYY-MM-DD)
+</ParamField>
+
+<ParamField query="toDate" type="string">
+  Filter by transaction date end (ISO 8601: YYYY-MM-DD)
+</ParamField>
+
+<ParamField query="limit" type="integer" default="50">
+  Maximum items per page
+</ParamField>
+
+<ParamField query="offset" type="integer" default="0">
+  Number of items to skip
+</ParamField>
+
+<ResponseExample>
+```json
+{
+  "entries": [
+    {
+      "id": "je_123e4567-e89b-12d3-a456-426614174000",
+      "organizationId": "org_123e4567-e89b-12d3-a456-426614174000",
+      "companyId": "comp_123e4567-e89b-12d3-a456-426614174000",
+      "description": "Monthly rent payment",
+      "transactionDate": "2025-03-01",
+      "documentDate": "2025-03-01",
+      "fiscalPeriod": { "year": 2025, "period": 3 },
+      "entryType": "Standard",
+      "sourceModule": "AccountsPayable",
+      "referenceNumber": "AP-2025-0315",
+      "sourceDocumentRef": "INV-98765",
+      "status": "Posted",
+      "createdBy": "user_123e4567-e89b-12d3-a456-426614174000",
+      "postedBy": "user_123e4567-e89b-12d3-a456-426614174000",
+      "postedAt": "2025-03-01T15:30:00Z",
+      "createdAt": "2025-03-01T14:00:00Z",
+      "updatedAt": "2025-03-01T15:30:00Z"
+    }
+  ],
+  "total": 1247,
+  "limit": 50,
+  "offset": 0
+}
+```
+</ResponseExample>
+
+## Get Journal Entry
+
+Retrieve a single journal entry with all its line items.
+
+```bash GET /api/v1/journal-entries/{id}
+curl -X GET "https://your-instance.accountability.app/api/v1/journal-entries/{entryId}?organizationId={orgId}" \
+  -H "Authorization: Bearer your-session-token"
+```
+
+<ParamField path="id" type="string" required>
+  Journal entry UUID
+</ParamField>
+
+<ParamField query="organizationId" type="string" required>
+  Organization UUID
+</ParamField>
+
+<ResponseExample>
+```json
+{
+  "entry": {
+    "id": "je_123e4567-e89b-12d3-a456-426614174000",
+    "organizationId": "org_123e4567-e89b-12d3-a456-426614174000",
+    "companyId": "comp_123e4567-e89b-12d3-a456-426614174000",
+    "description": "Monthly rent payment",
+    "transactionDate": "2025-03-01",
+    "documentDate": "2025-03-01",
+    "fiscalPeriod": { "year": 2025, "period": 3 },
+    "entryType": "Standard",
+    "sourceModule": "AccountsPayable",
+    "referenceNumber": "AP-2025-0315",
+    "sourceDocumentRef": "INV-98765",
+    "status": "Posted",
+    "createdBy": "user_123e4567-e89b-12d3-a456-426614174000",
+    "postedBy": "user_123e4567-e89b-12d3-a456-426614174000",
+    "postedAt": "2025-03-01T15:30:00Z",
+    "createdAt": "2025-03-01T14:00:00Z",
+    "updatedAt": "2025-03-01T15:30:00Z"
+  },
+  "lines": [
+    {
+      "id": "jel_123e4567-e89b-12d3-a456-426614174000",
+      "journalEntryId": "je_123e4567-e89b-12d3-a456-426614174000",
+      "lineNumber": 1,
+      "accountId": "acc_5010",
+      "debitAmount": { "value": "5000.00", "currency": "USD" },
+      "creditAmount": null,
+      "memo": "Office rent - March 2025",
+      "dimensions": null,
+      "intercompanyPartnerId": null
+    },
+    {
+      "id": "jel_987e6543-e21b-12d3-a456-426614174000",
+      "journalEntryId": "je_123e4567-e89b-12d3-a456-426614174000",
+      "lineNumber": 2,
+      "accountId": "acc_1010",
+      "debitAmount": null,
+      "creditAmount": { "value": "5000.00", "currency": "USD" },
+      "memo": "Cash payment",
+      "dimensions": null,
+      "intercompanyPartnerId": null
+    }
+  ]
+}
+```
+</ResponseExample>
+
+## Create Journal Entry
+
+Create a new journal entry in draft status. Entries must have at least 2 lines and debits must equal credits.
+
+```bash POST /api/v1/journal-entries
+curl -X POST "https://your-instance.accountability.app/api/v1/journal-entries" \
+  -H "Authorization: Bearer your-session-token" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "organizationId": "org_123e4567-e89b-12d3-a456-426614174000",
+    "companyId": "comp_123e4567-e89b-12d3-a456-426614174000",
+    "description": "Monthly rent payment",
+    "transactionDate": "2025-03-01",
+    "documentDate": "2025-03-01",
+    "fiscalPeriod": null,
+    "entryType": "Standard",
+    "sourceModule": "GeneralLedger",
+    "referenceNumber": "JE-2025-0001",
+    "sourceDocumentRef": null,
+    "lines": [
+      {
+        "accountId": "acc_5010",
+        "debitAmount": { "value": "5000.00", "currency": "USD" },
+        "creditAmount": null,
+        "memo": "Office rent - March 2025",
+        "dimensions": null,
+        "intercompanyPartnerId": null
+      },
+      {
+        "accountId": "acc_1010",
+        "debitAmount": null,
+        "creditAmount": { "value": "5000.00", "currency": "USD" },
+        "memo": "Cash payment",
+        "dimensions": null,
+        "intercompanyPartnerId": null
+      }
+    ]
+  }'
+```
+
+<ParamField body="organizationId" type="string" required>
+  Organization UUID
+</ParamField>
+
+<ParamField body="companyId" type="string" required>
+  Company UUID
+</ParamField>
+
+<ParamField body="description" type="string" required>
+  Entry description
+</ParamField>
+
+<ParamField body="transactionDate" type="string" required>
+  Transaction date (ISO 8601: YYYY-MM-DD)
+</ParamField>
+
+<ParamField body="documentDate" type="string">
+  Document date if different from transaction date
+</ParamField>
+
+<ParamField body="fiscalPeriod" type="object">
+  Fiscal period reference (auto-computed from transactionDate if null)
+  - `year`: integer
+  - `period`: integer (1-13)
+</ParamField>
+
+<ParamField body="entryType" type="enum" required>
+  Entry type: `Standard`, `Adjusting`, `Closing`, `Reversing`, `Recurring`
+</ParamField>
+
+<ParamField body="sourceModule" type="enum" required>
+  Source module: `GeneralLedger`, `AccountsPayable`, `AccountsReceivable`, `Payroll`, `Inventory`, `FixedAssets`
+</ParamField>
+
+<ParamField body="referenceNumber" type="string">
+  Optional reference number
+</ParamField>
+
+<ParamField body="sourceDocumentRef" type="string">
+  Optional source document reference
+</ParamField>
+
+<ParamField body="lines" type="array" required>
+  Array of journal entry lines (minimum 2)
+  
+  Each line must have:
+  - `accountId` (string, required): Account UUID
+  - `debitAmount` (MonetaryAmount | null): Debit amount
+  - `creditAmount` (MonetaryAmount | null): Credit amount
+  - `memo` (string): Optional line memo
+  - `dimensions` (object): Optional key-value pairs for dimensions
+  - `intercompanyPartnerId` (string): Optional related company UUID
+</ParamField>
+
+<Note>
+Either `debitAmount` or `creditAmount` must be provided for each line, but not both. Total debits must equal total credits.
+</Note>
+
+## Update Journal Entry
+
+Update a draft journal entry. Only entries in Draft status can be updated.
+
+```bash PUT /api/v1/journal-entries/{id}
+curl -X PUT "https://your-instance.accountability.app/api/v1/journal-entries/{entryId}" \
+  -H "Authorization: Bearer your-session-token" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "organizationId": "org_123e4567-e89b-12d3-a456-426614174000",
+    "description": "Updated description",
+    "transactionDate": "2025-03-02"
+  }'
+```
+
+<ParamField path="id" type="string" required>
+  Journal entry UUID
+</ParamField>
+
+<ParamField body="organizationId" type="string" required>
+  Organization UUID
+</ParamField>
+
+All fields are optional - only provided fields will be updated.
+
+## Delete Journal Entry
+
+Delete a draft journal entry. Only entries in Draft status can be deleted.
+
+```bash DELETE /api/v1/journal-entries/{id}
+curl -X DELETE "https://your-instance.accountability.app/api/v1/journal-entries/{entryId}?organizationId={orgId}" \
+  -H "Authorization: Bearer your-session-token"
+```
+
+## Submit for Approval
+
+Submit a draft entry for approval (changes status from Draft to PendingApproval).
+
+```bash POST /api/v1/journal-entries/{id}/submit
+curl -X POST "https://your-instance.accountability.app/api/v1/journal-entries/{entryId}/submit?organizationId={orgId}" \
+  -H "Authorization: Bearer your-session-token"
+```
+
+## Approve Journal Entry
+
+Approve a pending entry (changes status from PendingApproval to Approved).
+
+```bash POST /api/v1/journal-entries/{id}/approve
+curl -X POST "https://your-instance.accountability.app/api/v1/journal-entries/{entryId}/approve?organizationId={orgId}" \
+  -H "Authorization: Bearer your-session-token"
+```
+
+## Reject Journal Entry
+
+Reject a pending entry and return to draft for corrections.
+
+```bash POST /api/v1/journal-entries/{id}/reject
+curl -X POST "https://your-instance.accountability.app/api/v1/journal-entries/{entryId}/reject?organizationId={orgId}" \
+  -H "Authorization: Bearer your-session-token" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "reason": "Missing supporting documentation"
+  }'
+```
+
+<ParamField body="reason" type="string">
+  Optional reason for rejection
+</ParamField>
+
+## Post Journal Entry
+
+Post an approved entry to the general ledger. This updates account balances and locks the entry.
+
+```bash POST /api/v1/journal-entries/{id}/post
+curl -X POST "https://your-instance.accountability.app/api/v1/journal-entries/{entryId}/post" \
+  -H "Authorization: Bearer your-session-token" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "organizationId": "org_123e4567-e89b-12d3-a456-426614174000",
+    "postedBy": "user_123e4567-e89b-12d3-a456-426614174000",
+    "postingDate": "2025-03-15"
+  }'
+```
+
+<ParamField body="organizationId" type="string" required>
+  Organization UUID
+</ParamField>
+
+<ParamField body="postedBy" type="string" required>
+  User UUID who is posting the entry
+</ParamField>
+
+<ParamField body="postingDate" type="string">
+  Optional posting date (defaults to current date)
+</ParamField>
+
+<Warning>
+Posting is irreversible (entries can only be reversed, not deleted). Posting updates all affected account balances.
+</Warning>
+
+## Reverse Journal Entry
+
+Reverse a posted entry by creating a new entry with opposite debits and credits.
+
+```bash POST /api/v1/journal-entries/{id}/reverse
+curl -X POST "https://your-instance.accountability.app/api/v1/journal-entries/{entryId}/reverse" \
+  -H "Authorization: Bearer your-session-token" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "organizationId": "org_123e4567-e89b-12d3-a456-426614174000",
+    "reversalDate": "2025-03-20",
+    "reversalDescription": "Reversal of incorrect entry",
+    "reversedBy": "user_123e4567-e89b-12d3-a456-426614174000"
+  }'
+```
+
+<ParamField body="organizationId" type="string" required>
+  Organization UUID
+</ParamField>
+
+<ParamField body="reversalDate" type="string" required>
+  Date for the reversal entry (ISO 8601: YYYY-MM-DD)
+</ParamField>
+
+<ParamField body="reversalDescription" type="string">
+  Optional description for the reversal entry
+</ParamField>
+
+<ParamField body="reversedBy" type="string" required>
+  User UUID who is reversing the entry
+</ParamField>
+
+## Error Responses
+
+<AccordionGroup>
+  <Accordion title="Entry Not Found (404)">
+    ```json
+    {
+      "_tag": "JournalEntryNotFoundError",
+      "journalEntryId": "je_123e4567-e89b-12d3-a456-426614174000",
+      "message": "Journal entry not found"
+    }
+    ```
+  </Accordion>
+  
+  <Accordion title="Unbalanced Entry (400)">
+    ```json
+    {
+      "_tag": "UnbalancedJournalEntryError",
+      "totalDebits": "5000.00",
+      "totalCredits": "4500.00",
+      "difference": "500.00",
+      "message": "Journal entry is unbalanced: debits must equal credits"
+    }
+    ```
+  </Accordion>
+  
+  <Accordion title="Invalid Status Transition (400)">
+    ```json
+    {
+      "_tag": "JournalEntryStatusError",
+      "currentStatus": "Posted",
+      "attemptedAction": "Update",
+      "message": "Cannot update a Posted journal entry"
+    }
+    ```
+  </Accordion>
+  
+  <Accordion title="Fiscal Period Closed (400)">
+    ```json
+    {
+      "_tag": "FiscalPeriodClosedError",
+      "fiscalYear": 2025,
+      "fiscalPeriod": 2,
+      "message": "Fiscal period 2025-02 is closed and does not allow journal entries"
+    }
+    ```
+  </Accordion>
+  
+  <Accordion title="Already Reversed (409)">
+    ```json
+    {
+      "_tag": "JournalEntryAlreadyReversedError",
+      "journalEntryId": "je_123e4567-e89b-12d3-a456-426614174000",
+      "reversedAt": "2025-03-15T10:30:00Z",
+      "message": "Journal entry has already been reversed"
+    }
+    ```
+  </Accordion>
+</AccordionGroup>

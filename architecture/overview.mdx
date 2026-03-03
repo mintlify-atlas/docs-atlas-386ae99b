@@ -1,0 +1,339 @@
+---
+title: Architecture Overview
+description: High-level architecture of the Accountability multi-company accounting application
+---
+
+## Introduction
+
+Accountability is a multi-company, multi-currency accounting SaaS application built with a **strict separation between backend and frontend**. The backend uses Effect-TS for functional, type-safe business logic, while the frontend uses React with TanStack Start for server-side rendering.
+
+<Note>
+  **Critical Design Principle**: Backend and frontend must stay aligned. Frontend-only workarounds are not acceptable. All features must be implemented across all layers: Frontend → API → Service → Repository → Database.
+</Note>
+
+## System Architecture
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                      FRONTEND (web)                         │
+│  React + TanStack Start + openapi-fetch + Tailwind          │
+│  NO Effect code - loaders for SSR, useState for UI          │
+└─────────────────────────────────────────────────────────────┘
+                              │
+                              │ HTTP (openapi-fetch client)
+                              ▼
+┌─────────────────────────────────────────────────────────────┐
+│                       BACKEND (api)                          │
+│  Effect HttpApi + HttpApiBuilder                             │
+│  Exports OpenAPI spec for client generation                  │
+└─────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────┐
+│                   PERSISTENCE + CORE                         │
+│  @effect/sql + PostgreSQL │ Effect business logic            │
+└─────────────────────────────────────────────────────────────┘
+```
+
+## Architectural Layers
+
+### 1. Frontend Layer (packages/web)
+
+**Technology**: React, TanStack Start, openapi-fetch, Tailwind CSS
+
+**Responsibilities**:
+- Server-side rendering (SSR) with TanStack Start loaders
+- Client-side interactivity with React hooks
+- Type-safe API calls using generated openapi-fetch client
+- UI state management with `useState` and `useReducer`
+- No Effect code - pure React patterns
+
+**Key Patterns**:
+- Data fetching in route `loader()` functions for SSR
+- Client-side mutations with `router.invalidate()` for refetching
+- Tailwind CSS for styling (no inline styles)
+- Component composition over prop drilling
+
+### 2. API Layer (packages/api)
+
+**Technology**: Effect HttpApi, HttpApiBuilder
+
+**Responsibilities**:
+- HTTP endpoint definitions with typed schemas
+- Request/response validation using Effect Schema
+- Authentication and authorization middleware
+- OpenAPI specification generation
+- Error mapping from domain to HTTP status codes
+
+**Key Patterns**:
+- `HttpApiEndpoint` for endpoint definitions
+- `HttpApiGroup` for organizing related endpoints
+- `HttpApiMiddleware` for cross-cutting concerns
+- Cookie-based authentication with httpOnly cookies
+
+### 3. Core Layer (packages/core)
+
+**Technology**: Effect, Effect Schema
+
+**Responsibilities**:
+- Domain entities (Account, Company, JournalEntry, etc.)
+- Business logic services (AccountService, ReportingService, etc.)
+- Value objects (CurrencyCode, AccountId, MonetaryAmount, etc.)
+- Domain errors as Schema.TaggedError
+- 100% test coverage requirement
+
+**Key Patterns**:
+- `Schema.Class` for domain entities
+- `Context.Tag` for service definitions
+- `Layer.effect` and `Layer.scoped` for service implementations
+- Branded types for IDs (AccountId, CompanyId, etc.)
+- Effect generators for composing operations
+
+### 4. Persistence Layer (packages/persistence)
+
+**Technology**: @effect/sql, @effect/sql-pg, PostgreSQL
+
+**Responsibilities**:
+- Repository interfaces and implementations
+- Database schema migrations
+- SQL query construction with type safety
+- Transaction management
+- Database connection pooling
+
+**Key Patterns**:
+- `SqlSchema.findOne`, `SqlSchema.findAll` for queries
+- `SqlSchema.void` for commands (INSERT/UPDATE/DELETE)
+- `Model.Class` for repository entities
+- Transaction support via `sql.withTransaction`
+
+## Data Flow
+
+### Request Flow (Read)
+
+```
+1. User visits page
+   ↓
+2. TanStack Start loader executes (SSR)
+   ↓
+3. Loader calls openapi-fetch client
+   ↓
+4. API endpoint receives request
+   ↓
+5. API calls Service in core layer
+   ↓
+6. Service calls Repository in persistence layer
+   ↓
+7. Repository queries PostgreSQL
+   ↓
+8. Data flows back up the stack
+   ↓
+9. Page renders with data (SSR or hydrated)
+```
+
+### Mutation Flow (Write)
+
+```
+1. User submits form
+   ↓
+2. React event handler calls openapi-fetch client
+   ↓
+3. API endpoint validates request payload
+   ↓
+4. API calls Service with validated data
+   ↓
+5. Service executes business logic
+   ↓
+6. Service calls Repository to persist
+   ↓
+7. Repository executes SQL INSERT/UPDATE
+   ↓
+8. Success/error response flows back
+   ↓
+9. Frontend calls router.invalidate() to refetch
+   ↓
+10. Page re-renders with fresh data
+```
+
+## Key Design Decisions
+
+### Effect on Backend Only
+
+**Decision**: Use Effect-TS exclusively for backend code (core, persistence, api packages). Frontend uses standard React patterns.
+
+**Rationale**:
+- Effect's learning curve is steep - limiting to backend reduces complexity
+- Backend benefits most from Effect's type safety and error handling
+- Frontend developers can work with familiar React patterns
+- Clear separation of concerns between layers
+
+### Type-Safe API Contract
+
+**Decision**: Generate OpenAPI spec from Effect HttpApi and use it to generate typed fetch client for frontend.
+
+**Rationale**:
+- Single source of truth for API contract (Effect schemas)
+- Compile-time type safety across frontend/backend boundary
+- Automatic client code generation reduces boilerplate
+- Schema changes automatically propagate to frontend types
+
+### No Barrel Files
+
+**Decision**: Import from specific modules, never create index.ts barrel files.
+
+**Rationale**:
+- Avoids circular dependency issues
+- Explicit imports make dependencies clear
+- Better tree-shaking for production bundles
+- Easier to trace where code is defined
+
+### Flat Module Structure
+
+**Decision**: Organize code by domain with flat file structure (e.g., `accounting/Account.ts`, not `accounting/entities/Account/index.ts`).
+
+**Rationale**:
+- Simpler navigation and fewer nesting levels
+- Clear naming conventions prevent collisions
+- Easier to find code with text search
+- Reduced cognitive load
+
+## Multi-Tenancy Model
+
+### Organization-Level Isolation
+
+Accountability uses **organization-level multi-tenancy**:
+
+- Each organization owns multiple companies
+- Users belong to organizations via memberships
+- All queries are scoped by organizationId
+- Single shared PostgreSQL database with row-level security
+
+### Authorization
+
+**RBAC (Role-Based Access Control)** with functional roles:
+- Admin: Full access to organization
+- AccountingManager: Manage chart of accounts, journal entries
+- FinancialAnalyst: Read-only access to reports
+- Auditor: Read-only access to all financial data
+
+**ABAC (Attribute-Based Access Control)** for fine-grained policies:
+- Organization membership required
+- Company-specific permissions
+- Period lock enforcement (no entries in closed periods)
+
+## Scalability Considerations
+
+### Current Architecture
+
+- **Monolithic deployment**: All packages deployed together
+- **Single PostgreSQL database**: Shared across all organizations
+- **SSR + Client-side hydration**: Fast initial page loads
+- **Connection pooling**: Efficient database resource usage
+
+### Future Scaling Options
+
+1. **Horizontal scaling**: Deploy multiple instances behind load balancer
+2. **Read replicas**: Separate read/write database connections
+3. **Caching layer**: Redis for frequently accessed data (exchange rates, chart of accounts)
+4. **CDN**: Static assets and client-side bundles
+5. **Database partitioning**: Partition tables by organizationId
+
+## Security Architecture
+
+### Authentication
+
+- Multi-provider support (Local, Google OAuth, WorkOS SSO)
+- httpOnly cookies for session tokens (XSS protection)
+- Secure, sameSite=strict cookies (CSRF protection)
+- Session expiration and rotation
+
+### Authorization
+
+- Policy-based authorization engine
+- Middleware enforcement at API layer
+- Service-layer validation for defense in depth
+- Audit logging for all authorization decisions
+
+### Data Protection
+
+- TLS/HTTPS for all connections
+- Encrypted database connections
+- No sensitive data in logs
+- Regular security audits
+
+## Error Handling
+
+### Three-Layer Error Architecture
+
+1. **Domain Errors** (core): Business logic errors (AccountNotFound, ValidationError)
+2. **API Errors** (api): HTTP-appropriate errors with status codes
+3. **Frontend Errors** (web): User-friendly error messages with recovery actions
+
+See [Error Handling](/architecture/error-handling) for detailed patterns.
+
+## Testing Strategy
+
+### Test Pyramid
+
+```
+       ┌─────────────┐
+       │  E2E Tests  │  ← Playwright (critical user flows)
+       │   ~50       │
+       └─────────────┘
+      ┌───────────────┐
+      │ Integration   │  ← Vitest + testcontainers (with real DB)
+      │    ~100       │
+      └───────────────┘
+    ┌─────────────────┐
+    │   Unit Tests    │  ← @effect/vitest (pure logic)
+    │     ~500        │
+    └─────────────────┘
+```
+
+**Coverage Requirements**:
+- Core package: 100% test coverage
+- Persistence: 90% test coverage
+- API: 80% test coverage
+- Frontend: E2E coverage of critical flows
+
+See [Testing](/architecture/testing) for detailed strategy.
+
+## Development Workflow
+
+### Local Development
+
+```bash
+# Start dev server (hot reload enabled)
+pnpm dev
+
+# Run tests in watch mode
+pnpm test
+
+# Type check
+pnpm typecheck
+
+# Generate API client after API changes
+pnpm --filter @accountability/web generate:api
+```
+
+### Pre-Commit Checklist
+
+- [ ] All tests pass (`pnpm test`)
+- [ ] Type checking passes (`pnpm typecheck`)
+- [ ] Linting passes (`pnpm lint`)
+- [ ] Code formatted (`pnpm format`)
+- [ ] API client regenerated if API changed
+- [ ] Migration created if schema changed
+
+## Next Steps
+
+Explore the detailed architecture documentation:
+
+- [Tech Stack](/architecture/tech-stack) - Technologies and dependencies
+- [Project Structure](/architecture/project-structure) - Monorepo organization
+- [Effect Framework](/architecture/effect-framework) - Effect patterns and best practices
+- [Domain Model](/architecture/domain-model) - Business entities and value objects
+- [Persistence](/architecture/persistence) - Database layer and SQL patterns
+- [Frontend Architecture](/architecture/frontend-architecture) - React and UI patterns
+- [SSR and Routing](/architecture/ssr-and-routing) - TanStack Start patterns
+- [Testing](/architecture/testing) - Testing strategy and patterns
+- [Error Handling](/architecture/error-handling) - Error architecture and patterns

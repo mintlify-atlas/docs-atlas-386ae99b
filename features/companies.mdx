@@ -1,0 +1,407 @@
+---
+title: Companies
+description: Company management, company types, and hierarchies
+---
+
+## Overview
+
+Companies represent legal entities within an organization. Each company has its own:
+
+- **Functional currency** (primary operating currency)
+- **Chart of accounts** (accounts are company-specific)
+- **Fiscal year end** (defines fiscal periods)
+- **Jurisdiction** (country of incorporation/operation)
+
+<Info>
+Companies are the primary scope for accounting operations. Journal entries, accounts, and fiscal periods are all scoped to a company.
+</Info>
+
+## Company Data Model
+
+```typescript packages/core/src/company/Company.ts
+export class Company extends Schema.Class<Company>("Company")({
+  id: CompanyId,
+  organizationId: OrganizationId,
+  name: Schema.NonEmptyTrimmedString,
+  legalName: Schema.NonEmptyTrimmedString,
+  jurisdiction: JurisdictionCode,
+  functionalCurrency: CurrencyCode,
+  reportingCurrency: CurrencyCode,
+  fiscalYearEnd: FiscalYearEnd,
+  isActive: Schema.Boolean,
+  // ... additional fields
+})
+```
+
+### Core Properties
+
+<ResponseField name="id" type="CompanyId (UUID)" required>
+  Unique identifier for the company
+</ResponseField>
+
+<ResponseField name="organizationId" type="OrganizationId" required>
+  Reference to parent organization
+</ResponseField>
+
+<ResponseField name="name" type="string" required>
+  Display name of the company (e.g., "Acme Corp")
+</ResponseField>
+
+<ResponseField name="legalName" type="string" required>
+  Legal registered name (e.g., "Acme Corporation, Inc.")
+</ResponseField>
+
+<ResponseField name="jurisdiction" type="JurisdictionCode" required>
+  Country of incorporation (ISO 3166-1 alpha-2 code like "US", "GB", "DE")
+</ResponseField>
+
+<ResponseField name="functionalCurrency" type="CurrencyCode" required>
+  Primary operating currency per ASC 830 (ISO 4217 code)
+</ResponseField>
+
+<ResponseField name="reportingCurrency" type="CurrencyCode" required>
+  Currency used for financial statements (often same as functional currency)
+</ResponseField>
+
+<ResponseField name="fiscalYearEnd" type="FiscalYearEnd" required>
+  Fiscal year end date (month and day)
+</ResponseField>
+
+<ResponseField name="isActive" type="boolean" required>
+  Whether the company is currently active
+</ResponseField>
+
+### Optional Properties
+
+<ResponseField name="taxId" type="string" optional>
+  Tax identification number (EIN, VAT number, etc.)
+</ResponseField>
+
+<ResponseField name="incorporationDate" type="LocalDate" optional>
+  Date when the company was legally incorporated
+</ResponseField>
+
+<ResponseField name="registrationNumber" type="string" optional>
+  Company registration number for the jurisdiction
+</ResponseField>
+
+<ResponseField name="registeredAddress" type="Address" optional>
+  Official legal address where the company is registered
+</ResponseField>
+
+<ResponseField name="industryCode" type="string" optional>
+  NAICS or SIC industry classification code
+</ResponseField>
+
+<ResponseField name="companyType" type="CompanyType" optional>
+  Legal structure (Corporation, LLC, Partnership, etc.)
+</ResponseField>
+
+<ResponseField name="incorporationJurisdiction" type="JurisdictionCode" optional>
+  Jurisdiction where incorporated (if different from operating jurisdiction)
+</ResponseField>
+
+<ResponseField name="retainedEarningsAccountId" type="AccountId" optional>
+  Account for posting net income during year-end close
+</ResponseField>
+
+## Company Types
+
+Companies can have different legal structures:
+
+```typescript packages/core/src/company/CompanyType.ts
+export const CompanyType = Schema.Literal(
+  "Corporation",
+  "LLC",
+  "Partnership",
+  "SoleProprietorship",
+  "NonProfit",
+  "Cooperative",
+  "Branch",
+  "Other"
+)
+```
+
+<Tabs>
+  <Tab title="Corporation">
+    C-Corp, S-Corp, or public company with shareholders
+  </Tab>
+  <Tab title="LLC">
+    Limited Liability Company (US) or Limited Company (UK)
+  </Tab>
+  <Tab title="Partnership">
+    General or Limited Partnership with multiple partners
+  </Tab>
+  <Tab title="Sole Proprietorship">
+    Single owner business (unincorporated)
+  </Tab>
+  <Tab title="Non-Profit">
+    Tax-exempt charitable organization (501(c)(3) in US)
+  </Tab>
+  <Tab title="Cooperative">
+    Member-owned organization with shared governance
+  </Tab>
+  <Tab title="Branch">
+    Branch office of a foreign company (not separately incorporated)
+  </Tab>
+  <Tab title="Other">
+    Other legal structures not listed above
+  </Tab>
+</Tabs>
+
+## Fiscal Year End
+
+The fiscal year end defines when the company's fiscal year closes:
+
+```typescript packages/core/src/company/Company.ts
+export class FiscalYearEnd extends Schema.Class<FiscalYearEnd>("FiscalYearEnd")({
+  month: Schema.Number.pipe(Schema.int(), Schema.between(1, 12)),
+  day: Schema.Number.pipe(Schema.int(), Schema.between(1, 31))
+})
+```
+
+### Common Fiscal Year Ends
+
+<AccordionGroup>
+  <Accordion title="Calendar Year (December 31)">
+    ```typescript
+    const CALENDAR_YEAR_END = FiscalYearEnd.make({ month: 12, day: 31 })
+    ```
+    Most common for US companies. Fiscal year = calendar year.
+  </Accordion>
+
+  <Accordion title="Fiscal Year Ending March 31">
+    ```typescript
+    const FISCAL_YEAR_END_MARCH = FiscalYearEnd.make({ month: 3, day: 31 })
+    ```
+    Common in UK, India, Japan. Aligns with government fiscal year.
+  </Accordion>
+
+  <Accordion title="Fiscal Year Ending June 30">
+    ```typescript
+    const FISCAL_YEAR_END_JUNE = FiscalYearEnd.make({ month: 6, day: 30 })
+    ```
+    Common for educational institutions and governments in US, Australia.
+  </Accordion>
+
+  <Accordion title="Fiscal Year Ending September 30">
+    ```typescript
+    const FISCAL_YEAR_END_SEPTEMBER = FiscalYearEnd.make({ month: 9, day: 30 })
+    ```
+    US federal government fiscal year.
+  </Accordion>
+</AccordionGroup>
+
+### Display Format
+
+```typescript
+const fye = FiscalYearEnd.make({ month: 12, day: 31 })
+
+fye.isCalendarYearEnd  // true
+fye.toDisplayString()  // "December 31"
+```
+
+## Functional vs Reporting Currency
+
+<Warning>
+Functional currency and reporting currency are **distinct concepts** per ASC 830:
+</Warning>
+
+### Functional Currency
+
+The currency of the **primary economic environment** in which the entity operates:
+
+- Currency in which company generates revenue
+- Currency in which company incurs expenses
+- Currency of financing and investing activities
+
+<Note>
+Functional currency cannot be changed after initial setup. It reflects the economic reality of the company's operations.
+</Note>
+
+### Reporting Currency
+
+The currency used for **presenting financial statements**:
+
+- May differ from functional currency
+- Used for consolidated group reporting
+- Translation adjustments recorded in equity (OCI)
+
+<Steps>
+  <Step title="Same Currency Scenario">
+    US subsidiary with USD functional currency and USD reporting currency
+    
+    **No translation needed** - amounts recorded directly
+  </Step>
+  <Step title="Different Currency Scenario">
+    UK subsidiary with GBP functional currency and USD reporting currency
+    
+    **Translation required** - use current rate method (ASC 830)
+  </Step>
+</Steps>
+
+## Creating a Company
+
+### UI Workflow
+
+The company creation form includes multiple sections:
+
+<Tabs>
+  <Tab title="Basic Information">
+    - Company Name (required)
+    - Legal Name (required)
+    - Jurisdiction (required, searchable dropdown)
+    - Tax ID (optional)
+    - Incorporation Date (optional)
+    - Registration Number (optional)
+  </Tab>
+  <Tab title="Currency">
+    - Functional Currency (required, searchable)
+    - Reporting Currency (required, searchable)
+  </Tab>
+  <Tab title="Fiscal Year">
+    - Fiscal Year End Month and Day (default: December 31)
+    - Presets: Calendar Year, March 31, June 30, September 30
+  </Tab>
+  <Tab title="Additional Details">
+    - Company Type (optional)
+    - Industry Code (optional)
+    - Incorporation Jurisdiction (optional)
+    - Registered Address (optional)
+  </Tab>
+</Tabs>
+
+### Form Component
+
+```tsx packages/web/src/components/forms/CompanyForm.tsx
+export function CompanyForm({
+  currencies,          // Currency options
+  jurisdictions,       // Jurisdiction options
+  onSubmit,            // Submit handler
+  onCancel,            // Cancel handler
+  defaultCurrency      // Default from organization
+}: CompanyFormProps)
+```
+
+**Auto-Fill Features:**
+- When jurisdiction is selected, functional currency auto-fills from jurisdiction's default
+- Reporting currency defaults to same as functional currency
+- Fiscal year end defaults to December 31
+
+### API Request
+
+```typescript
+const { data, error } = await api.POST('/api/v1/companies', {
+  body: {
+    organizationId,
+    name: "Acme UK Ltd",
+    legalName: "Acme UK Limited",
+    jurisdiction: "GB",
+    taxId: "GB123456789",
+    functionalCurrency: "GBP",
+    reportingCurrency: "USD",
+    fiscalYearEnd: { month: 3, day: 31 },
+    companyType: "LLC"
+  }
+})
+```
+
+## Company Hierarchies
+
+<Info>
+Accountability supports complex company structures through **consolidation groups** rather than parent-child relationships on companies themselves.
+</Info>
+
+This design allows:
+
+- **Multiple consolidation scenarios** for the same company
+- **Different ownership percentages** in different contexts
+- **Flexible consolidation methods** (full, equity, cost, VIE)
+
+See the [Consolidation documentation](/advanced/consolidation) for details on defining parent-subsidiary relationships.
+
+## Retained Earnings Account
+
+The `retainedEarningsAccountId` field specifies where net income is posted during year-end close:
+
+```typescript
+company.retainedEarningsAccountId  // Option<AccountId>
+company.hasRetainedEarningsAccount // boolean getter
+```
+
+<Steps>
+  <Step title="Automatic Configuration">
+    When applying a Chart of Accounts template, the retained earnings account is automatically identified by the `isRetainedEarnings` flag
+  </Step>
+  <Step title="Manual Configuration">
+    Can be manually set in company settings to point to any Equity account with category "RetainedEarnings"
+  </Step>
+  <Step title="Year-End Close">
+    During year-end close, all Revenue and Expense accounts are closed to the retained earnings account
+  </Step>
+</Steps>
+
+## Best Practices
+
+<AccordionGroup>
+  <Accordion title="Choosing Functional Currency">
+    Use the currency that best reflects the company's economic environment:
+    
+    **Correct:** UK subsidiary operates primarily in UK → GBP
+    
+    **Incorrect:** UK subsidiary operates in UK but parent is in US → Don't use USD as functional currency just because parent uses USD
+    
+    Reporting currency can be USD for consolidation purposes.
+  </Accordion>
+
+  <Accordion title="Fiscal Year End Selection">
+    Consider:
+    - **Industry norms**: Retail often uses January 31 (post-holiday season)
+    - **Tax year alignment**: Match jurisdiction's tax year for simpler compliance
+    - **Seasonal business cycles**: End fiscal year after busy season for accurate results
+  </Accordion>
+
+  <Accordion title="Legal Name vs Display Name">
+    - **Legal Name**: Use full registered name exactly as it appears on incorporation documents
+    - **Display Name**: Use shorter, user-friendly name for everyday use
+    
+    Example:
+    - Legal Name: "Acme Corporation (UK) Limited"
+    - Display Name: "Acme UK"
+  </Accordion>
+</AccordionGroup>
+
+## Technical Details
+
+### Helper Methods
+
+```typescript packages/core/src/company/Company.ts
+const company = Company.make({ /* ... */ })
+
+// Check if functional and reporting currencies match
+company.hasSameFunctionalAndReportingCurrency  // boolean
+
+// Check if retained earnings account is configured
+company.hasRetainedEarningsAccount  // boolean
+```
+
+### Type Guards
+
+```typescript
+import { isCompany, isCompanyId, isCompanyType } from "@accountability/core/company"
+
+if (isCompany(value)) {
+  // value is Company
+}
+
+if (isCompanyType("Corporation")) {
+  // valid company type
+}
+```
+
+## Related Pages
+
+- [Organizations](/features/organizations) - Parent container for companies
+- [Chart of Accounts](/features/chart-of-accounts) - Company-specific account structure
+- [Fiscal Periods](/features/fiscal-periods) - Period management per company
+- [Multi-Currency](/features/multi-currency) - Currency translation for reporting

@@ -1,0 +1,559 @@
+---
+title: Multi-Currency
+description: Multi-currency support, functional vs presentation currency, and exchange rates
+---
+
+## Overview
+
+Accountability provides comprehensive multi-currency support following **ASC 830** (Foreign Currency Matters):
+
+- **Functional currency** per company (primary economic environment)
+- **Transaction currency** for foreign currency transactions
+- **Reporting currency** for consolidated financial statements
+- **Exchange rate management** with multiple rate types
+- **Currency translation** for consolidation
+
+<Info>
+Multi-currency accounting is essential for multinational organizations operating across different economic environments and jurisdictions.
+</Info>
+
+## Currency Data Model
+
+```typescript packages/core/src/currency/Currency.ts
+export class Currency extends Schema.Class<Currency>("Currency")({
+  code: CurrencyCode,         // ISO 4217 code ("USD", "EUR", "GBP")
+  name: Schema.NonEmptyTrimmedString,
+  symbol: Schema.NonEmptyTrimmedString,
+  decimalPlaces: DecimalPlaces,  // 0, 2, 3, or 4
+  isActive: Schema.Boolean
+})
+```
+
+### Currency Codes
+
+Accountability uses **ISO 4217** three-letter currency codes:
+
+```typescript packages/core/src/currency/CurrencyCode.ts
+export const CurrencyCode = Schema.String.pipe(
+  Schema.length(3),
+  Schema.pattern(/^[A-Z]{3}$/),
+  Schema.brand("CurrencyCode")
+)
+```
+
+**Examples**:
+- USD - United States Dollar
+- EUR - Euro
+- GBP - British Pound Sterling
+- JPY - Japanese Yen
+- CNY - Chinese Yuan
+
+### Decimal Places
+
+Different currencies use different decimal places:
+
+```typescript packages/core/src/currency/Currency.ts
+export const DecimalPlaces = Schema.Literal(0, 2, 3, 4)
+```
+
+<Tabs>
+  <Tab title="2 Decimal Places (Most Common)">
+    USD, EUR, GBP, CAD, AUD, CHF, etc.
+    
+    **Example**: $1,234.56
+  </Tab>
+  <Tab title="0 Decimal Places">
+    JPY (Japanese Yen), KRW (Korean Won)
+    
+    No fractional units (no cents/pence)
+    
+    **Example**: ¥1,234 (not ¥1,234.00)
+  </Tab>
+  <Tab title="3 Decimal Places">
+    KWD (Kuwaiti Dinar), BHD (Bahraini Dinar), OMR (Omani Rial)
+    
+    1 dinar = 1,000 fils
+    
+    **Example**: KD 1.234
+  </Tab>
+  <Tab title="4 Decimal Places">
+    CLF (Chilean Unit of Account)
+    
+    **Example**: CLF 1.2345
+  </Tab>
+</Tabs>
+
+### Predefined Currencies
+
+```typescript packages/core/src/currency/Currency.ts
+export const USD_CURRENCY = Currency.make({
+  code: CurrencyCode.make("USD"),
+  name: "US Dollar",
+  symbol: "$",
+  decimalPlaces: 2,
+  isActive: true
+})
+
+export const EUR_CURRENCY = Currency.make({
+  code: CurrencyCode.make("EUR"),
+  name: "Euro",
+  symbol: "€",
+  decimalPlaces: 2,
+  isActive: true
+})
+
+export const JPY_CURRENCY = Currency.make({
+  code: CurrencyCode.make("JPY"),
+  name: "Japanese Yen",
+  symbol: "¥",
+  decimalPlaces: 0,
+  isActive: true
+})
+```
+
+## Functional vs Reporting Currency
+
+<Warning>
+**Critical Distinction**: Functional currency and reporting currency serve different purposes per ASC 830.
+</Warning>
+
+### Functional Currency
+
+**Definition**: The currency of the **primary economic environment** in which the entity operates.
+
+Determined by analyzing:
+1. **Cash flow indicators**
+   - Currency that mainly influences sales prices
+   - Currency of country whose competitive forces determine sales prices
+
+2. **Sales price indicators**
+   - Currency in which sales prices are denominated and settled
+
+3. **Expense indicators**
+   - Currency in which labor, materials, and other costs are denominated and settled
+
+4. **Financing indicators**
+   - Currency in which funds are generated (equity, debt)
+   - Currency in which receipts from operating activities are retained
+
+<Tabs>
+  <Tab title="Example 1: US Subsidiary">
+    **Company**: Acme US, Inc.
+    
+    - Generates revenue in **USD**
+    - Pays expenses in **USD**
+    - Operates in **United States**
+    - Financing in **USD**
+    
+    **Functional Currency**: USD ✓
+  </Tab>
+  <Tab title="Example 2: UK Subsidiary">
+    **Company**: Acme UK Limited
+    
+    - Generates revenue in **GBP**
+    - Pays expenses in **GBP**
+    - Operates in **United Kingdom**
+    - Financing in **GBP**
+    
+    **Functional Currency**: GBP ✓
+  </Tab>
+  <Tab title="Example 3: Export-Heavy Subsidiary">
+    **Company**: Acme Germany GmbH
+    
+    - Generates revenue primarily in **USD** (exports to US)
+    - Pays expenses in **EUR** (local operations)
+    - Operates in **Germany**
+    - Financing in **EUR**
+    
+    **Functional Currency**: EUR (likely) - analyze specific facts
+  </Tab>
+</Tabs>
+
+<Note>
+Functional currency is determined once at inception and rarely changes. A change requires significant changes to the economic environment.
+</Note>
+
+### Reporting Currency
+
+The currency used for **presenting financial statements**:
+
+- Chosen by management for consolidated reporting
+- Often the functional currency of the parent company
+- Used for investor and regulatory reporting
+
+**Example**:
+- Parent: US company, functional currency USD
+- Subsidiary: UK company, functional currency GBP
+- **Reporting Currency**: USD (for consolidated statements)
+- **Translation**: GBP → USD using ASC 830 rules
+
+## Exchange Rates
+
+```typescript packages/core/src/currency/ExchangeRate.ts
+export class ExchangeRate extends Schema.Class<ExchangeRate>("ExchangeRate")({
+  id: ExchangeRateId,
+  organizationId: OrganizationId,
+  fromCurrency: CurrencyCode,
+  toCurrency: CurrencyCode,
+  rate: Rate,  // Positive BigDecimal
+  effectiveDate: LocalDate,
+  rateType: RateType,
+  source: RateSource,
+  createdAt: Timestamp
+})
+```
+
+### Rate Types
+
+```typescript packages/core/src/currency/ExchangeRate.ts
+export const RateType = Schema.Literal(
+  "Spot",
+  "Average",
+  "Historical",
+  "Closing"
+)
+```
+
+<Tabs>
+  <Tab title="Spot">
+    Current market rate at a point in time
+    
+    **Use for**: Transaction-date conversions
+    
+    **Example**: EUR/USD = 1.10 on March 15, 2025
+  </Tab>
+  <Tab title="Average">
+    Period average rate (monthly, quarterly, annual)
+    
+    **Use for**: Income statement translation (ASC 830)
+    
+    **Example**: March 2025 average EUR/USD = 1.08
+  </Tab>
+  <Tab title="Historical">
+    Rate at original transaction date
+    
+    **Use for**: Fixed asset translation, equity accounts
+    
+    **Example**: Equipment purchased Jan 1, 2020 at EUR/USD = 1.15
+  </Tab>
+  <Tab title="Closing">
+    End-of-period rate (month-end, quarter-end, year-end)
+    
+    **Use for**: Balance sheet translation (ASC 830)
+    
+    **Example**: December 31, 2025 EUR/USD = 1.12
+  </Tab>
+</Tabs>
+
+### Rate Sources
+
+```typescript packages/core/src/currency/ExchangeRate.ts
+export const RateSource = Schema.Literal("Manual", "Import", "API")
+```
+
+<AccordionGroup>
+  <Accordion title="Manual">
+    Manually entered by user
+    
+    - Entered via UI form
+    - Used for custom rates or overrides
+    - Audited with user ID and timestamp
+  </Accordion>
+
+  <Accordion title="Import">
+    Imported from file or external system
+    
+    - Bulk import via CSV/Excel
+    - Historical rate uploads
+    - Integration with treasury system
+  </Accordion>
+
+  <Accordion title="API">
+    Retrieved from API feed
+    
+    - Automatic daily updates
+    - Sources: ECB, Federal Reserve, Bloomberg, etc.
+    - Scheduled sync jobs
+  </Accordion>
+</AccordionGroup>
+
+### Exchange Rate Precision
+
+Exchange rates use **BigDecimal** for high precision:
+
+```typescript
+import * as BigDecimal from "effect/BigDecimal"
+
+const rate = BigDecimal.fromString("1.095432")  // High precision
+const amount = BigDecimal.fromNumber(1000)
+const converted = BigDecimal.multiply(amount, rate)  // 1095.432
+```
+
+<Info>
+BigDecimal avoids floating-point precision issues. All monetary calculations use BigDecimal for accuracy.
+</Info>
+
+## Recording Foreign Currency Transactions
+
+When a transaction occurs in a currency **other than** the functional currency:
+
+<Steps>
+  <Step title="Record at Transaction Date">
+    Convert foreign currency amount to functional currency using **spot rate** at transaction date
+    
+    **Example**:
+    - Date: March 1, 2025
+    - Transaction: €1,000 purchase
+    - Spot rate: 1 EUR = 1.10 USD
+    - Record: $1,100 expense
+  </Step>
+  <Step title="Recognize Exchange Gain/Loss (if applicable)">
+    For monetary items (receivables, payables), recognize exchange gain/loss at settlement or period end
+    
+    **Example**:
+    - AP booked: €1,000 = $1,100 (rate 1.10)
+    - Payment date: March 30, 2025
+    - Spot rate: 1 EUR = 1.08 USD
+    - Payment: €1,000 = $1,080
+    - **Exchange gain**: $20 (paid $1,080 instead of $1,100)
+  </Step>
+  <Step title="Journal Entry Line Structure">
+    Each line contains both transaction and functional currency amounts:
+    
+    ```typescript
+    {
+      accountId: "expense-account-id",
+      debitAmount: { amount: "1000.00", currency: "EUR" },
+      functionalCurrencyDebitAmount: { amount: "1100.00", currency: "USD" },
+      exchangeRate: "1.10"
+    }
+    ```
+  </Step>
+</Steps>
+
+### Multi-Currency Journal Entry Example
+
+**Scenario**: US company (functional currency USD) records EUR invoice
+
+```typescript
+const { data } = await api.POST('/api/v1/journal-entries', {
+  body: {
+    organizationId,
+    companyId,
+    description: "Purchase from German vendor",
+    transactionDate: "2025-03-01",
+    fiscalPeriod: { year: 2025, period: 3 },
+    entryType: "Standard",
+    sourceModule: "GeneralLedger",
+    lines: [
+      {
+        accountId: "inventory-account-id",
+        debitAmount: { amount: "1000.00", currency: "EUR" },
+        creditAmount: null,
+        memo: "Inventory purchase - Invoice #DE-1234"
+      },
+      {
+        accountId: "accounts-payable-id",
+        debitAmount: null,
+        creditAmount: { amount: "1000.00", currency: "EUR" },
+        memo: "Vendor: ABC GmbH"
+      }
+    ]
+  }
+})
+```
+
+**System Processing**:
+1. Validates both lines are in EUR (transaction currency)
+2. Looks up EUR/USD exchange rate for March 1, 2025
+3. Converts each line to USD (functional currency):
+   - Debit: €1,000 × 1.10 = $1,100
+   - Credit: €1,000 × 1.10 = $1,100
+4. Stores both transaction and functional amounts
+
+## Currency Translation for Consolidation
+
+When consolidating subsidiaries with different functional currencies:
+
+### Current Rate Method (ASC 830-30)
+
+Used when functional currency ≠ reporting currency:
+
+<Tabs>
+  <Tab title="Assets & Liabilities">
+    Translate at **current (closing) rate** at balance sheet date
+    
+    **Example**:
+    - UK subsidiary: Cash £100,000
+    - Dec 31 rate: 1 GBP = 1.25 USD
+    - Translated: $125,000
+  </Tab>
+  <Tab title="Revenue & Expenses">
+    Translate at **average rate** for the period
+    
+    **Example**:
+    - UK subsidiary: Annual revenue £500,000
+    - 2025 average rate: 1 GBP = 1.22 USD
+    - Translated: $610,000
+  </Tab>
+  <Tab title="Equity">
+    Translate at **historical rate** (rate when contributed/earned)
+    
+    - Common Stock: Historical rate at issuance
+    - Retained Earnings: Accumulation of net income at average rates
+  </Tab>
+  <Tab title="Translation Adjustment">
+    Plug to balance - recorded in **Accumulated Other Comprehensive Income (AOCI)**
+    
+    Not included in net income - reflects changes in exchange rates
+  </Tab>
+</Tabs>
+
+### Remeasurement Method
+
+Used when entity operates in **highly inflationary economy** or books of record are not in functional currency:
+
+- Monetary items: Current rate
+- Non-monetary items: Historical rate
+- Remeasurement gain/loss: Included in **net income**
+
+## Currency Restrictions
+
+Accounts can optionally be restricted to a specific currency:
+
+```typescript packages/core/src/accounting/Account.ts
+interface Account {
+  // ...
+  currencyRestriction: Option<CurrencyCode>  // null = any currency allowed
+}
+```
+
+**Use Cases**:
+- **Bank Accounts**: EUR bank account only accepts EUR transactions
+- **Foreign Currency Accounts**: JPY cash account for Japan operations
+- **Intercompany Accounts**: USD intercompany payable for US parent
+
+**Validation**:
+- Journal entry lines posting to restricted accounts **must** use the restricted currency
+- Attempts to post in other currencies will fail with validation error
+
+<Note>
+Most accounts have no currency restriction (`currencyRestriction: null`), allowing transactions in any currency. Use restrictions sparingly for specific bank accounts or foreign currency holdings.
+</Note>
+
+## Best Practices
+
+<AccordionGroup>
+  <Accordion title="Functional Currency Determination">
+    Document your functional currency analysis:
+    
+    1. **Economic factors**: Cash flows, pricing, expenses, financing
+    2. **Management assessment**: Support with memos and analysis
+    3. **Consistency**: Apply consistently unless facts change
+    4. **Audit support**: Retain documentation for auditors
+    
+    Functional currency is a **judgment call** - when in doubt, consult accounting advisors.
+  </Accordion>
+
+  <Accordion title="Exchange Rate Sources">
+    Use reliable, auditable exchange rate sources:
+    
+    **Recommended Sources**:
+    - European Central Bank (ECB) - free daily rates
+    - Federal Reserve H.10 release - official US rates
+    - OANDA - commercial FX data provider
+    - Bloomberg/Reuters - for financial institutions
+    
+    **Documentation**:
+    - Record rate source and date
+    - Maintain audit trail of rates used
+    - Consistent methodology (always use ECB, always use closing rate, etc.)
+  </Accordion>
+
+  <Accordion title="Period-End Currency Revaluation">
+    At each period end, revalue foreign currency monetary items:
+    
+    1. **Identify monetary items**: Cash, AR, AP, loans in foreign currency
+    2. **Apply current rate**: Use period-end closing rate
+    3. **Calculate gain/loss**: Compare to carrying amount
+    4. **Record entry**: Recognize unrealized gain/loss in income
+    
+    **Example**:
+    - AR: €10,000 booked at 1.10 = $11,000
+    - Month-end rate: 1.12
+    - Revalued: €10,000 × 1.12 = $11,200
+    - Unrealized gain: $200 (credit to "Foreign Exchange Gain")
+  </Accordion>
+
+  <Accordion title="Consolidation Translation">
+    Follow ASC 830 methodology:
+    
+    1. **Identify functional currency** for each entity
+    2. **Record transactions** in functional currency
+    3. **Translate to reporting currency** at consolidation:
+       - Assets/Liabilities: Closing rate
+       - Income/Expenses: Average rate
+       - Equity: Historical rates
+    4. **Record CTA** in AOCI (Accumulated Other Comprehensive Income)
+    
+    Use consistent rates across all subsidiaries for same period.
+  </Accordion>
+</AccordionGroup>
+
+## Technical Details
+
+### Monetary Amount Type
+
+```typescript packages/core/src/shared/values/MonetaryAmount.ts
+export class MonetaryAmount extends Schema.Class<MonetaryAmount>("MonetaryAmount")({
+  amount: Schema.BigDecimal,
+  currency: CurrencyCode
+})
+
+const usdAmount = MonetaryAmount.make({
+  amount: BigDecimal.fromString("1234.56"),
+  currency: CurrencyCode.make("USD")
+})
+```
+
+### Currency Conversion Helper
+
+```typescript packages/core/src/currency/ExchangeRate.ts
+export const convertAmount = (
+  amount: BigDecimal.BigDecimal,
+  exchangeRate: ExchangeRate
+): BigDecimal.BigDecimal => {
+  return BigDecimal.multiply(amount, exchangeRate.rate)
+}
+
+// Usage
+const eurAmount = BigDecimal.fromNumber(1000)
+const exchangeRate = ExchangeRate.make({
+  fromCurrency: "EUR",
+  toCurrency: "USD",
+  rate: BigDecimal.fromString("1.10"),
+  // ...
+})
+const usdAmount = convertAmount(eurAmount, exchangeRate)  // 1100.00
+```
+
+### Type Guards
+
+```typescript
+import { isCurrency, isCurrencyCode, isExchangeRate } from "@accountability/core/currency"
+
+if (isCurrency(value)) {
+  // value is Currency
+}
+
+if (isCurrencyCode("USD")) {
+  // valid currency code
+}
+```
+
+## Related Pages
+
+- [Organizations](/features/organizations) - Reporting currency configuration
+- [Companies](/features/companies) - Functional currency per company
+- [Journal Entries](/features/journal-entries) - Multi-currency transaction recording
+- [Chart of Accounts](/features/chart-of-accounts) - Currency restrictions on accounts

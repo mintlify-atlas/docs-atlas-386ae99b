@@ -1,0 +1,181 @@
+---
+title: 'Trial Balance'
+description: 'Generate trial balance reports to verify accounting equation integrity'
+icon: 'scale-balanced'
+---
+
+## Overview
+
+The trial balance is a fundamental accounting report that lists all accounts with their debit and credit balances at a specific point in time. It verifies that the accounting equation holds (debits equal credits) and serves as the foundation for other financial statements.
+
+<Info>
+The trial balance is generated from the `TrialBalanceService` in `packages/core/src/accounting/TrialBalanceService.ts`.
+</Info>
+
+## Report Structure
+
+A trial balance report contains:
+
+### Metadata
+
+- **Company ID**: The company for which the report is generated
+- **As-of Date**: The point-in-time date for the report
+- **Period Start Date** (optional): For period-based trial balances showing activity during a specific period
+- **Currency**: The functional currency used for the report
+- **Generated At**: Timestamp when the report was created
+- **Account Count**: Total number of accounts with balances
+- **Is Balanced**: Boolean indicating if debits equal credits
+
+### Line Items
+
+Each line item in the trial balance includes:
+
+```typescript
+interface TrialBalanceLineItem {
+  accountId: AccountId
+  accountNumber: string
+  accountName: string
+  accountType: "Asset" | "Liability" | "Equity" | "Revenue" | "Expense"
+  accountCategory: string
+  normalBalance: "Debit" | "Credit"
+  debitBalance: MonetaryAmount
+  creditBalance: MonetaryAmount
+}
+```
+
+<Note>
+Per accounting convention, each account appears in only one column:
+- **Debit-balance accounts** (Assets, Expenses) show amounts in the debit column
+- **Credit-balance accounts** (Liabilities, Equity, Revenue) show amounts in the credit column
+</Note>
+
+### Totals
+
+- **Total Debits**: Sum of all debit balances
+- **Total Credits**: Sum of all credit balances
+
+## Generating a Trial Balance
+
+<Steps>
+<Step title="Select the company and date range">
+Choose the company and the as-of date for the trial balance. Optionally specify a period start date for period-based reports.
+</Step>
+
+<Step title="Configure display options">
+Decide whether to include zero-balance accounts. By default, accounts with zero balances are excluded for cleaner reports.
+</Step>
+
+<Step title="Generate the report">
+The service fetches all accounts and posted journal entries, then calculates debit and credit totals for each account using `calculateDebitCreditTotals` or `calculatePeriodDebitCreditTotals`.
+</Step>
+
+<Step title="Validate balancing">
+The system automatically validates that total debits equal total credits. If they don't match, a `TrialBalanceNotBalancedError` is raised, indicating a serious data integrity issue.
+</Step>
+</Steps>
+
+## Service Methods
+
+### generateTrialBalance
+
+Generates a complete trial balance report for a company.
+
+```typescript
+interface GenerateTrialBalanceInput {
+  companyId: CompanyId
+  asOfDate: LocalDate
+  excludeZeroBalances?: boolean  // default: true
+  periodStartDate?: LocalDate    // optional: for period-based reports
+}
+
+function generateTrialBalance(
+  input: GenerateTrialBalanceInput
+): Effect<TrialBalanceReport, CompanyNotFoundError | TrialBalanceNotBalancedError>
+```
+
+**Returns**: `TrialBalanceReport` with metadata, line items, and totals
+
+**Errors**:
+- `CompanyNotFoundError`: Company does not exist
+- `TrialBalanceNotBalancedError`: Debits do not equal credits (data integrity issue)
+
+## Report Features
+
+### Balance Validation
+
+The trial balance automatically validates the fundamental accounting equation:
+
+```typescript
+totalDebits === totalCredits
+```
+
+If this equation doesn't hold, it indicates:
+- Missing journal entry lines
+- Incorrect posting logic
+- Data corruption
+
+### Filtering by Account Type
+
+The report provides helper methods to filter accounts:
+
+- `getLineItemsByType(type)`: Filter by specific account type
+- `balanceSheetItems`: Get all Asset, Liability, and Equity accounts
+- `incomeStatementItems`: Get all Revenue and Expense accounts
+
+### Net Balance Calculation
+
+Each line item can calculate its net balance in the normal direction:
+
+- **Debit accounts**: `debitBalance - creditBalance`
+- **Credit accounts**: `creditBalance - debitBalance`
+
+## UI Workflow
+
+<Tabs>
+  <Tab title="Cumulative Report">
+    1. Navigate to **Reports** → **Trial Balance**
+    2. Select the company from the dropdown
+    3. Choose the as-of date using the date picker
+    4. Toggle **Show zero balances** if you want to include accounts with no activity
+    5. Click **Generate Report**
+    6. Review the report showing all accounts with debit/credit columns
+    7. Verify that **Total Debits** equals **Total Credits** at the bottom
+  </Tab>
+  
+  <Tab title="Period Report">
+    1. Navigate to **Reports** → **Trial Balance**
+    2. Select the company from the dropdown
+    3. Choose **Period Start Date** and **Period End Date**
+    4. Click **Generate Report**
+    5. Review account activity during the specific period only
+    6. Export to Excel or PDF for further analysis
+  </Tab>
+</Tabs>
+
+## Export Options
+
+Trial balance reports can be exported in multiple formats:
+
+- **PDF**: Formatted report suitable for printing
+- **Excel**: Spreadsheet format with debit/credit columns
+- **CSV**: Raw data export for custom analysis
+
+<Note>
+The trial balance serves as the starting point for generating other financial statements including the balance sheet and income statement.
+</Note>
+
+## Error Handling
+
+When generating trial balances, the following errors may occur:
+
+| Error | Cause | Resolution |
+|-------|-------|------------|
+| `CompanyNotFoundError` | Invalid company ID | Verify the company exists and is active |
+| `TrialBalanceNotBalancedError` | Debits ≠ Credits | Review journal entries for missing lines or incorrect amounts |
+
+## Best Practices
+
+1. **Regular Validation**: Generate trial balances regularly (monthly, quarterly) to catch accounting errors early
+2. **Period-Based Reports**: Use period-based trial balances to analyze activity within specific date ranges
+3. **Zero Balance Exclusion**: Exclude zero balances for cleaner reports when reviewing active accounts
+4. **Multi-Currency**: For multi-currency companies, the trial balance uses the functional currency with all transactions translated

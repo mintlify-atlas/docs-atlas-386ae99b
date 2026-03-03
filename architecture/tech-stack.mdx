@@ -1,0 +1,488 @@
+---
+title: Technology Stack
+description: Technologies, frameworks, and libraries used in the Accountability project
+---
+
+## Overview
+
+Accountability uses a modern, type-safe technology stack optimized for developer productivity and runtime safety. The stack is intentionally minimal, with each technology chosen for specific strengths.
+
+## Backend Technologies
+
+### Effect-TS (v3.19+)
+
+**Purpose**: Functional programming framework for TypeScript
+
+**Why Effect**:
+- **Type-safe error handling**: All errors in the type signature
+- **Composable effects**: Build complex logic from simple pieces
+- **Dependency injection**: Context system for testable services
+- **Built-in concurrency**: Fibers, streams, and structured concurrency
+- **Excellent testing support**: TestClock, property-based testing
+
+**Key Modules**:
+```typescript
+import * as Effect from "effect/Effect"
+import * as Schema from "effect/Schema"
+import * as Context from "effect/Context"
+import * as Layer from "effect/Layer"
+import * as Option from "effect/Option"
+import * as Either from "effect/Either"
+import * as Chunk from "effect/Chunk"
+```
+
+**Example Usage**:
+```typescript
+const findAccount = (id: AccountId) =>
+  Effect.gen(function* () {
+    const repo = yield* AccountRepository
+    const account = yield* repo.findById(id)
+    return yield* Option.match(account, {
+      onNone: () => Effect.fail(new AccountNotFound({ id })),
+      onSome: Effect.succeed
+    })
+  })
+```
+
+### Effect Schema
+
+**Purpose**: Runtime type validation and schema definition
+
+**Why Schema**:
+- **Single source of truth**: One schema for TypeScript types and runtime validation
+- **Automatic validation**: Decode unknown data safely
+- **Transformations**: Convert between representations (e.g., string → Date)
+- **Branded types**: Prevent primitive obsession
+- **Error messages**: Detailed validation errors
+
+**Example Usage**:
+```typescript
+export class Account extends Schema.Class<Account>("Account")({
+  id: AccountId,
+  name: Schema.NonEmptyTrimmedString,
+  accountType: Schema.Literal("Asset", "Liability", "Equity", "Revenue", "Expense"),
+  isActive: Schema.Boolean
+}) {}
+
+// Branded type
+export const AccountId = Schema.NonEmptyTrimmedString.pipe(
+  Schema.brand("AccountId")
+)
+export type AccountId = typeof AccountId.Type
+
+// Usage
+const account = Account.make({
+  id: AccountId.make("acc_123"),
+  name: "Cash",
+  accountType: "Asset",
+  isActive: true
+})
+```
+
+### @effect/sql (v0.49+)
+
+**Purpose**: Type-safe SQL query builder
+
+**Why @effect/sql**:
+- **Template literal queries**: Write SQL naturally
+- **Schema validation**: Decode results with Effect Schema
+- **Transaction support**: Automatic rollback on error
+- **Connection pooling**: Efficient resource management
+- **PostgreSQL optimized**: Leverage Postgres-specific features
+
+**Example Usage**:
+```typescript
+const findById = SqlSchema.findOne({
+  Request: AccountId,
+  Result: AccountRow,
+  execute: (id) => sql`
+    SELECT id, account_number, name, account_type, is_active
+    FROM accounts
+    WHERE id = ${id}
+  `
+})
+```
+
+### Effect HttpApi
+
+**Purpose**: Type-safe HTTP API framework
+
+**Why HttpApi**:
+- **Type-safe endpoints**: Request/response types enforced
+- **Automatic OpenAPI generation**: Single source of truth
+- **Middleware support**: Authentication, logging, error handling
+- **Schema validation**: Automatic payload/query param validation
+- **Error mapping**: Map domain errors to HTTP status codes
+
+**Example Usage**:
+```typescript
+const getAccount = HttpApiEndpoint.get("getAccount", "/accounts/:id")
+  .setPath(Schema.Struct({ id: AccountId }))
+  .addSuccess(Account)
+  .addError(NotFoundError, { status: 404 })
+
+class AccountsApi extends HttpApiGroup.make("accounts")
+  .add(getAccount)
+  .prefix("/api/v1")
+{}
+```
+
+## Frontend Technologies
+
+### React (v19)
+
+**Purpose**: UI library for component-based interfaces
+
+**Why React 19**:
+- **Server Components**: Better SSR performance
+- **Improved hydration**: Faster client-side startup
+- **Stable ecosystem**: Mature tooling and libraries
+- **Large talent pool**: Easy to hire React developers
+
+**Key Patterns**:
+- Functional components only (no class components)
+- Hooks for state and side effects
+- Component composition over prop drilling
+- Presentational vs. container components
+
+### TanStack Start (v1.147+)
+
+**Purpose**: Full-stack React framework with SSR
+
+**Why TanStack Start**:
+- **File-based routing**: Routes based on file structure
+- **Type-safe routing**: Generated route types
+- **Data loaders**: SSR data fetching built-in
+- **Nested layouts**: Shared layouts for route groups
+- **Streaming SSR**: Progressive page rendering
+
+**Example Usage**:
+```typescript
+export const Route = createFileRoute("/organizations/")({
+  loader: async ({ request }) => {
+    const cookie = request.headers.get("cookie")
+    const { data } = await api.GET("/api/v1/organizations", {
+      headers: cookie ? { cookie } : undefined
+    })
+    return { organizations: data ?? [] }
+  },
+  component: OrganizationsPage
+})
+
+function OrganizationsPage() {
+  const { organizations } = Route.useLoaderData()
+  return <ul>{organizations.map(org => <li key={org.id}>{org.name}</li>)}</ul>
+}
+```
+
+### openapi-fetch
+
+**Purpose**: Type-safe fetch client generated from OpenAPI spec
+
+**Why openapi-fetch**:
+- **Auto-generated types**: No manual client code
+- **Compile-time safety**: Catches API mismatches at build time
+- **Standard fetch API**: Familiar interface
+- **Lightweight**: Minimal runtime overhead
+
+**Example Usage**:
+```typescript
+import createClient from "openapi-fetch"
+import type { paths } from "./generated/api-schema"
+
+export const api = createClient<paths>({
+  baseUrl: "http://localhost:3000"
+})
+
+// Type-safe API calls
+const { data, error } = await api.GET("/api/v1/accounts/{id}", {
+  params: { path: { id: "acc_123" } }
+})
+
+if (error) {
+  console.error(error.status, error.body)
+} else {
+  console.log(data.name) // TypeScript knows the shape!
+}
+```
+
+### Tailwind CSS (v4.1+)
+
+**Purpose**: Utility-first CSS framework
+
+**Why Tailwind**:
+- **Rapid development**: Build UIs without writing CSS
+- **Consistent design**: Predefined spacing, colors, typography
+- **Responsive by default**: Mobile-first breakpoints
+- **Tree-shakable**: Unused styles removed in production
+- **No naming conflicts**: No global CSS class collisions
+
+**Example Usage**:
+```tsx
+function Button({ children, variant = "primary" }: Props) {
+  return (
+    <button className={clsx(
+      "px-4 py-2 rounded-md font-medium transition-colors",
+      "focus:outline-none focus:ring-2 focus:ring-offset-2",
+      variant === "primary" && "bg-blue-600 text-white hover:bg-blue-700",
+      variant === "secondary" && "bg-gray-200 text-gray-800 hover:bg-gray-300"
+    )}>
+      {children}
+    </button>
+  )
+}
+```
+
+## Database
+
+### PostgreSQL (v14+)
+
+**Purpose**: Primary data store
+
+**Why PostgreSQL**:
+- **ACID compliance**: Strong consistency guarantees
+- **JSON support**: Flexible for complex data structures
+- **Full-text search**: Built-in search capabilities
+- **Advanced features**: CTEs, window functions, array types
+- **Mature ecosystem**: Excellent tooling and extensions
+- **Open source**: No licensing costs
+
+**Schema Management**:
+- Migrations written in TypeScript using Effect
+- Version-controlled SQL schema
+- Automated migration execution on startup
+
+**Connection Pooling**:
+```typescript
+const PgClientLive = PgClient.layer({
+  url: Config.redacted("DATABASE_URL"),
+  poolSize: 20,
+  idleTimeout: Duration.seconds(30)
+})
+```
+
+## Testing Technologies
+
+### Vitest (v3.2+)
+
+**Purpose**: Unit and integration test runner
+
+**Why Vitest**:
+- **Fast**: Blazing fast test execution
+- **Compatible**: Works with Vite ecosystem
+- **Watch mode**: Instant feedback during development
+- **Coverage**: Built-in code coverage reports
+- **ESM native**: No CommonJS quirks
+
+### @effect/vitest
+
+**Purpose**: Effect-specific test utilities
+
+**Why @effect/vitest**:
+- **TestClock**: Fast-forward time in tests
+- **Layer support**: Easy service mocking
+- **Property testing**: FastCheck integration
+- **it.effect**: Effect-aware test functions
+
+**Example Usage**:
+```typescript
+import { describe, it, expect, layer } from "@effect/vitest"
+
+layer(AccountServiceLive)("AccountService", (it) => {
+  it.effect("finds account by id", () =>
+    Effect.gen(function* () {
+      const service = yield* AccountService
+      const account = yield* service.findById(testAccountId)
+      expect(account.name).toBe("Cash")
+    })
+  )
+})
+```
+
+### Playwright (v1.57+)
+
+**Purpose**: End-to-end browser testing
+
+**Why Playwright**:
+- **Multi-browser**: Test Chrome, Firefox, Safari
+- **Auto-wait**: Waits for elements automatically
+- **Debugging**: Visual debugger and trace viewer
+- **CI-friendly**: Headless mode for automated runs
+- **Network mocking**: Intercept and mock requests
+
+**Example Usage**:
+```typescript
+import { test, expect } from "@playwright/test"
+
+test("should login with valid credentials", async ({ page }) => {
+  await page.goto("/login")
+  await page.fill('[data-testid="email-input"]', "user@example.com")
+  await page.fill('[data-testid="password-input"]', "password123")
+  await page.click('[data-testid="login-button"]')
+  
+  await page.waitForURL("/")
+  await expect(page.locator('[data-testid="user-menu"]')).toBeVisible()
+})
+```
+
+### testcontainers
+
+**Purpose**: Spin up real PostgreSQL for integration tests
+
+**Why testcontainers**:
+- **Real database**: Test against actual PostgreSQL
+- **Isolated**: Each test suite gets fresh DB
+- **No mocks**: Test real SQL queries
+- **CI-friendly**: Works in Docker-enabled CI
+
+**Example Usage**:
+```typescript
+import { PostgreSqlContainer } from "@testcontainers/postgresql"
+
+const container = await new PostgreSqlContainer("postgres:alpine").start()
+const connectionUri = container.getConnectionUri()
+
+const PgClientLive = PgClient.layer({
+  url: Redacted.make(connectionUri)
+})
+```
+
+## Development Tools
+
+### TypeScript (v5.8+)
+
+**Purpose**: Type-safe JavaScript with modern features
+
+**Configuration**:
+- `strict: true` - All strictness checks enabled
+- `noUncheckedIndexedAccess: true` - Safe array/object access
+- `exactOptionalPropertyTypes: true` - Strict optional properties
+
+### ESLint (v9+)
+
+**Purpose**: Code linting and style enforcement
+
+**Custom Rules**:
+- `no-disable-validation` - Ban `disableValidation: true`
+- `no-silent-error-swallow` - Prevent `() => Effect.void` in catch
+- `no-effect-ignore` - Ban `Effect.ignore`
+- `no-catchAllCause` - Ban `Effect.catchAllCause`
+
+### Prettier (v3.7+)
+
+**Purpose**: Code formatting
+
+**Configuration**:
+- 2 space indentation
+- Semicolons required
+- Double quotes
+- Trailing commas (ES5)
+
+## Package Manager
+
+### pnpm (v10.17+)
+
+**Purpose**: Fast, disk-efficient package manager
+
+**Why pnpm**:
+- **Fast**: Symlinks packages from global store
+- **Disk efficient**: Shared packages across projects
+- **Strict**: No phantom dependencies
+- **Workspace support**: Built-in monorepo management
+
+**Workspace Configuration**:
+```yaml
+packages:
+  - 'packages/*'
+```
+
+## Build Tools
+
+### Vite (v7.1+)
+
+**Purpose**: Frontend build tool and dev server
+
+**Why Vite**:
+- **Fast HMR**: Instant hot module replacement
+- **ESM native**: Native ES modules in dev
+- **Plugin ecosystem**: Rich plugin ecosystem
+- **Optimized builds**: Rollup-based production builds
+
+### Rolldown (via rolldown-vite)
+
+**Purpose**: Rust-based bundler (Vite alternative)
+
+**Why Rolldown**:
+- **10x faster builds**: Rust performance
+- **Vite compatible**: Drop-in replacement
+- **Future-proof**: Next-gen tooling
+
+**Configuration**:
+```json
+{
+  "pnpm": {
+    "overrides": {
+      "vite": "npm:rolldown-vite@7.3.1"
+    }
+  }
+}
+```
+
+## Deployment
+
+### Nitro
+
+**Purpose**: Universal server for TanStack Start
+
+**Why Nitro**:
+- **Framework-agnostic**: Works with any framework
+- **Multiple targets**: Node, Workers, serverless
+- **Auto-imports**: Smart code splitting
+- **Built-in optimizations**: Compression, caching
+
+## Version Requirements
+
+| Technology | Minimum Version | Current Version |
+|------------|----------------|------------------|
+| Node.js | 20.0.0 | 20.x LTS |
+| pnpm | 10.17.1 | 10.17.1 |
+| TypeScript | 5.8.0 | 5.8.3 |
+| React | 19.0.0 | 19.0.0 |
+| Effect | 3.19.0 | 3.19.14 |
+| PostgreSQL | 14.0 | 16.x |
+
+## Dependency Management
+
+### Core Dependencies
+
+**Backend**:
+- `effect` - Effect runtime
+- `@effect/platform` - Platform abstractions
+- `@effect/sql` - SQL client
+- `@effect/sql-pg` - PostgreSQL driver
+
+**Frontend**:
+- `react` + `react-dom` - UI library
+- `@tanstack/react-start` - Full-stack framework
+- `openapi-fetch` - API client
+- `tailwindcss` - CSS framework
+- `lucide-react` - Icon library
+
+**Testing**:
+- `vitest` - Test runner
+- `@effect/vitest` - Effect test utilities
+- `@playwright/test` - E2E testing
+- `@testcontainers/postgresql` - Database testing
+
+### Update Strategy
+
+- **Effect packages**: Update together (same version)
+- **React ecosystem**: Update conservatively (test thoroughly)
+- **Database**: Pin to major version (14, 15, 16)
+- **Tooling**: Update frequently (Vite, ESLint, Prettier)
+
+## Next Steps
+
+- [Project Structure](/architecture/project-structure) - How packages are organized
+- [Effect Framework](/architecture/effect-framework) - Effect patterns and best practices
+- [Frontend Architecture](/architecture/frontend-architecture) - React patterns and UI guidelines

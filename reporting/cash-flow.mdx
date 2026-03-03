@@ -1,0 +1,362 @@
+---
+title: 'Cash Flow Statement'
+description: 'Generate cash flow statements showing operating, investing, and financing activities'
+icon: 'money-bill-transfer'
+---
+
+## Overview
+
+The cash flow statement reports cash inflows and outflows over a period, categorized into operating, investing, and financing activities. It uses the indirect method per ASC 230, starting with net income and adjusting for non-cash items.
+
+<Info>
+Cash flow statements are generated using `CashFlowStatementService` in `packages/core/src/reporting/CashFlowStatementService.ts`, following ASC 230 standards.
+</Info>
+
+## Report Structure
+
+### Three Main Sections
+
+<Tabs>
+  <Tab title="Operating Activities">
+    **Indirect Method** (starts with net income)
+    
+    1. **Net Income** (from income statement)
+    
+    2. **Adjustments for non-cash items:**
+       - Depreciation and amortization (+)
+       - Gains on asset sales (-)
+       - Losses on asset sales (+)
+    
+    3. **Changes in working capital:**
+       - Accounts receivable decrease (+) / increase (-)
+       - Inventory decrease (+) / increase (-)
+       - Prepaid expenses decrease (+) / increase (-)
+       - Accounts payable increase (+) / decrease (-)
+       - Accrued liabilities increase (+) / decrease (-)
+    
+    = **Net Cash from Operating Activities**
+  </Tab>
+  
+  <Tab title="Investing Activities">
+    **Capital Expenditures and Investments**
+    
+    - Purchase of property, plant & equipment (-)
+    - Sale of fixed assets (+)
+    - Purchase of investments (-)
+    - Sale of investments (+)
+    - Acquisition of businesses (-)
+    - Proceeds from asset sales (+)
+    
+    = **Net Cash from Investing Activities**
+  </Tab>
+  
+  <Tab title="Financing Activities">
+    **Debt and Equity Transactions**
+    
+    - Proceeds from debt issuance (+)
+    - Repayment of debt (-)
+    - Proceeds from equity issuance (+)
+    - Purchase of treasury stock (-)
+    - Dividends paid (-)
+    - Capital contributions (+)
+    
+    = **Net Cash from Financing Activities**
+  </Tab>
+</Tabs>
+
+### Cash Reconciliation
+
+```
+Net Cash from Operating Activities
++ Net Cash from Investing Activities
++ Net Cash from Financing Activities
+= Net Change in Cash
++ Beginning Cash Balance
+= Ending Cash Balance
+```
+
+## Line Item Structure
+
+```typescript
+interface CashFlowLineItem {
+  accountId?: AccountId          // null for adjustments/subtotals
+  accountNumber?: string         // for display
+  description: string            // adjustment description or label
+  amount: MonetaryAmount         // positive = inflow, negative = outflow
+  isSubtotal: boolean
+  indentLevel: number            // for hierarchical display
+  style: "Normal" | "Subtotal" | "Total" | "Header"
+}
+```
+
+<Note>
+Cash inflows are shown as positive amounts, while cash outflows are shown as negative amounts, making it easy to see the net impact on cash.
+</Note>
+
+## Generating a Cash Flow Statement
+
+<Steps>
+<Step title="Select company and period">
+Choose the company and the reporting period (start date and end date). The cash flow statement requires a period to show the change in cash.
+</Step>
+
+<Step title="Gather required data">
+The service automatically retrieves:
+- Income statement data (net income)
+- Balance sheet data (beginning and ending balances)
+- Journal entries for the period
+</Step>
+
+<Step title="Calculate operating activities">
+Starting with net income, the service:
+1. Adds back non-cash expenses (depreciation, amortization)
+2. Adjusts for gains/losses on asset disposals
+3. Calculates working capital changes from balance sheet movements
+</Step>
+
+<Step title="Calculate investing and financing">
+Analyzes journal entries to identify:
+- Capital expenditures and asset sales (investing)
+- Debt and equity transactions (financing)
+</Step>
+
+<Step title="Reconcile to cash movement">
+Validates that net cash change equals the actual change in cash accounts from the beginning to ending balance sheet.
+</Step>
+</Steps>
+
+## Service Methods
+
+### generateCashFlowStatement
+
+Generates a complete cash flow statement using the indirect method.
+
+```typescript
+interface GenerateCashFlowStatementInput {
+  companyId: CompanyId
+  periodStart: LocalDate
+  periodEnd: LocalDate
+}
+
+function generateCashFlowStatement(
+  input: GenerateCashFlowStatementInput
+): Effect<CashFlowStatementReport, CompanyNotFoundError | InvalidPeriodError | CashFlowReconciliationError>
+```
+
+**Returns**: `CashFlowStatementReport` with all three activity sections and reconciliation
+
+**Errors**:
+- `CompanyNotFoundError`: Company does not exist
+- `InvalidPeriodError`: Period start date is after period end date
+- `CashFlowReconciliationError`: Net cash change doesn't match balance sheet cash movement
+
+## Operating Activities (Indirect Method)
+
+### Why Indirect Method?
+
+Per ASC 230, the indirect method is most commonly used because it:
+- Reconciles net income to cash flow
+- Shows the relationship between the income statement and cash
+- Highlights non-cash items and working capital changes
+
+### Non-Cash Adjustments
+
+These items affected net income but didn't affect cash:
+
+```typescript
+// Add back expenses that didn't use cash
++ Depreciation expense
++ Amortization expense
++ Stock-based compensation
+
+// Remove gains/losses that are classified elsewhere
+- Gain on sale of assets (investing activity)
++ Loss on sale of assets (investing activity)
+```
+
+### Working Capital Changes
+
+Changes in current assets and current liabilities:
+
+```typescript
+// Current Asset changes (opposite of balance sheet change)
+- Increase in accounts receivable (cash not yet collected)
++ Decrease in accounts receivable (cash collected)
+- Increase in inventory (cash used to buy inventory)
++ Decrease in inventory (inventory sold, converted to receivables/cash)
+
+// Current Liability changes (same as balance sheet change)
++ Increase in accounts payable (delayed cash payment)
+- Decrease in accounts payable (cash paid)
+```
+
+## Section Types
+
+```typescript
+type CashFlowSectionType =
+  | "Operating"   // Cash from business operations
+  | "Investing"   // Cash from capital expenditures and investments
+  | "Financing"   // Cash from debt, equity, and dividends
+```
+
+## UI Workflow
+
+<Tabs>
+  <Tab title="Generate Report">
+    1. Navigate to **Reports** → **Cash Flow Statement**
+    2. Select the company
+    3. Choose **Period Start Date** (e.g., January 1, 2024)
+    4. Choose **Period End Date** (e.g., December 31, 2024)
+    5. Click **Generate Report**
+    6. Review cash flow sections:
+       - Operating activities (indirect method)
+       - Investing activities
+       - Financing activities
+    7. Verify reconciliation:
+       - Net change in cash
+       - Beginning cash balance
+       - Ending cash balance matches balance sheet
+    8. Export to PDF or Excel
+  </Tab>
+  
+  <Tab title="Analyze Cash Sources">
+    1. Generate cash flow statement
+    2. Review **Operating Activities**:
+       - Is operating cash flow positive?
+       - How does it compare to net income?
+       - Are working capital changes favorable?
+    3. Review **Investing Activities**:
+       - Capital expenditures for growth
+       - Asset sales proceeds
+       - Net investment activity
+    4. Review **Financing Activities**:
+       - Debt financing/repayment
+       - Equity raised/returned
+       - Dividends paid
+    5. Assess overall cash position and trends
+  </Tab>
+  
+  <Tab title="Quarterly Analysis">
+    1. Generate quarterly cash flow statements
+    2. Compare quarters to identify:
+       - Seasonal working capital patterns
+       - Quarterly cash generation trends
+       - Investment cycles
+    3. Calculate key ratios:
+       - Operating cash flow / Net income
+       - Free cash flow (Operating - CapEx)
+       - Cash conversion cycle
+    4. Export trend analysis
+  </Tab>
+</Tabs>
+
+## Cash Flow Reconciliation
+
+The statement validates that the calculated cash flow matches the actual change in cash accounts:
+
+```typescript
+// Validation check
+netCashChange === (endingCashBalance - beginningCashBalance)
+```
+
+If this doesn't match, a `CashFlowReconciliationError` is raised, indicating:
+- Missing journal entries
+- Incorrectly classified transactions
+- Cash account balance issues
+
+## Supplemental Disclosures
+
+Per ASC 230, the cash flow statement includes supplemental information:
+
+- **Cash paid for interest**: Total interest expense paid in cash
+- **Cash paid for income taxes**: Total income tax paid in cash
+- **Non-cash transactions**: Significant investing/financing activities that didn't affect cash
+
+## Report Features
+
+### Line Item Helpers
+
+```typescript
+// Check if cash inflow
+lineItem.isCashInflow  // amount > 0
+
+// Check if cash outflow
+lineItem.isCashOutflow  // amount < 0
+
+// Check line type
+lineItem.isAccountLine
+lineItem.isTotalLine
+lineItem.isHeaderLine
+```
+
+### Section Summaries
+
+Each section provides a net cash total:
+
+```typescript
+interface CashFlowSection {
+  title: string                    // "Operating Activities"
+  lineItems: CashFlowLineItem[]
+  netCash: MonetaryAmount         // Section total
+}
+```
+
+## Key Metrics
+
+The cash flow statement enables calculation of:
+
+### Operating Cash Flow Metrics
+
+- **Cash Flow Margin**: Operating Cash Flow / Revenue
+- **Quality of Earnings**: Operating Cash Flow / Net Income
+- **Cash Return on Assets**: Operating Cash Flow / Total Assets
+
+### Free Cash Flow
+
+```typescript
+freeCashFlow = operatingCashFlow - capitalExpenditures
+```
+
+Free cash flow represents cash available after maintaining/growing the business.
+
+## Export Formats
+
+Cash flow statements support:
+
+- **PDF**: Professional formatted statement with company header
+- **Excel**: Workbook with sections, formulas, and supplemental schedules
+- **CSV**: Raw data export for analysis
+- **JSON**: Structured data for API integration
+
+## Best Practices
+
+1. **Monthly Generation**: Generate monthly cash flow statements to monitor liquidity
+2. **Compare to Budget**: Track actual vs. projected cash flow
+3. **Free Cash Flow**: Monitor free cash flow as a key health indicator
+4. **Working Capital**: Analyze working capital trends in operating activities
+5. **Cash Runway**: Calculate months of cash remaining based on operating burn rate
+
+## Common Issues
+
+| Issue | Cause | Resolution |
+|-------|-------|------------|
+| Reconciliation error | Cash change doesn't match balance sheet | Verify all cash accounts included, check for unposted entries |
+| Negative operating cash flow | Working capital drain or losses | Analyze working capital changes and profitability |
+| Large investing outflows | Capital expenditures | Verify CapEx is properly classified, not expensed |
+| Missing non-cash adjustments | Depreciation not added back | Ensure all non-cash expenses are identified |
+
+<Info>
+The indirect method is preferred because it shows how net income converts to cash flow, highlighting the difference between accrual accounting and cash accounting.
+</Info>
+
+## Understanding Cash vs. Profit
+
+The cash flow statement reveals the crucial difference between profit and cash:
+
+- **Net Income**: Measures profitability (accrual basis)
+- **Operating Cash Flow**: Measures actual cash generated
+- **Free Cash Flow**: Measures cash available for growth, debt repayment, or distributions
+
+<Note>
+A company can be profitable (positive net income) but still have negative cash flow due to working capital increases or capital expenditures. Conversely, a company can have positive cash flow while reporting losses due to non-cash charges.
+</Note>

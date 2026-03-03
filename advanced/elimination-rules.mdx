@@ -1,0 +1,386 @@
+---
+title: 'Elimination Rules'
+description: 'Configure automatic elimination rules for consolidation processing'
+---
+
+# Elimination Rules
+
+Elimination rules define how intercompany transactions and balances are automatically removed during consolidation. When a parent company consolidates its subsidiaries, transactions between group members must be eliminated to avoid overstating revenues, expenses, assets, and liabilities.
+
+## Why Elimination is Required
+
+When companies within a consolidation group transact with each other, these transactions appear on both companies' books:
+
+- **Intercompany sale**: Seller records revenue, buyer records expense/asset
+- **Intercompany loan**: Lender records receivable, borrower records payable
+- **Dividend payment**: Subsidiary records expense, parent records income
+
+From the consolidated entity's perspective, these are internal transfers with no economic substance. Elimination rules automatically remove these transactions during consolidation.
+
+## Elimination Types
+
+The system supports six types of eliminations per ASC 810:
+
+### Intercompany Receivable/Payable
+
+**Purpose**: Eliminate accounts receivable and accounts payable between group companies.
+
+**Example**: If Company A has $50,000 receivable from Company B, and Company B has $50,000 payable to Company A, both balances must be eliminated.
+
+**Accounting**:
+```
+DR  Intercompany Payable    $50,000
+  CR  Intercompany Receivable         $50,000
+```
+
+### Intercompany Revenue/Expense
+
+**Purpose**: Eliminate sales revenue and corresponding cost of goods sold or expenses.
+
+**Example**: Company A sells goods to Company B for $100,000. Company A records revenue, Company B records COGS or expense.
+
+**Accounting**:
+```
+DR  Intercompany Revenue     $100,000
+  CR  Intercompany COGS/Expense       $100,000
+```
+
+### Intercompany Dividend
+
+**Purpose**: Eliminate dividend income recorded by parent from dividends paid by subsidiary.
+
+**Example**: Subsidiary pays $25,000 dividend to parent.
+
+**Accounting**:
+```
+DR  Dividend Income          $25,000
+  CR  Dividends Paid                  $25,000
+```
+
+### Intercompany Investment
+
+**Purpose**: Eliminate parent's investment in subsidiary against subsidiary's equity.
+
+**Example**: Parent holds investment of $500,000 in subsidiary, representing their share of equity.
+
+**Accounting**:
+```
+DR  Subsidiary Equity        $500,000
+  CR  Investment in Subsidiary        $500,000
+```
+
+<Info>
+This elimination is typically done at acquisition and adjusted for subsequent changes in equity. Any excess of investment over equity is recognized as goodwill.
+</Info>
+
+### Unrealized Profit - Inventory
+
+**Purpose**: Eliminate profit on inventory sold to another group member that remains unsold to external parties.
+
+**Example**: Company A sells inventory to Company B at $120,000 (cost $100,000). Company B still holds the inventory at period end.
+
+**Accounting**:
+```
+DR  Intercompany Sales       $20,000
+  CR  Inventory                       $20,000
+```
+
+### Unrealized Profit - Fixed Assets
+
+**Purpose**: Eliminate profit on fixed assets transferred between group members.
+
+**Example**: Company A sells equipment to Company B for $80,000 (carrying value $60,000).
+
+**Accounting**:
+```
+DR  Gain on Sale of Equipment  $20,000
+  CR  Fixed Assets                        $20,000
+```
+
+<Note>
+Unrealized profit eliminations are gradually reversed over time as the inventory is sold to external parties or as the fixed asset is depreciated.
+</Note>
+
+## Creating an Elimination Rule
+
+<Steps>
+
+### Navigate to elimination rules
+
+Go to **Consolidation** > select your consolidation group > **Elimination Rules** tab.
+
+### Create new rule
+
+Click **Add Elimination Rule** and provide:
+
+- **Rule name** - Descriptive name (e.g., "Eliminate IC Receivables/Payables")
+- **Description** - Optional detailed explanation of the rule's purpose
+- **Elimination type** - Select from the six types listed above
+
+### Configure trigger conditions
+
+Define when this rule should apply:
+
+- **Source accounts** - Which accounts trigger the rule (using account selectors)
+- **Minimum amount** - Optional threshold; only transactions above this amount trigger the rule
+
+### Specify source and target accounts
+
+**Source accounts** (what to eliminate):
+- Use account selectors to identify accounts containing intercompany balances
+- Can select by specific account, account range, or account category
+
+**Target accounts** (where eliminations post):
+- Specify where the offsetting elimination entries post
+- Can use same account or different elimination accounts
+
+### Set debit and credit accounts
+
+Specify the specific accounts for the elimination entry:
+
+- **Debit account** - Account to debit in the elimination entry
+- **Credit account** - Account to credit in the elimination entry
+
+### Configure processing options
+
+- **Automatic processing** - Enable to auto-generate eliminations during consolidation runs
+- **Priority** - Lower numbers execute first (0 = highest priority)
+- **Active status** - Toggle to enable/disable the rule
+
+</Steps>
+
+## Account Selectors
+
+Elimination rules use flexible account selectors to target accounts:
+
+### By Specific Account ID
+
+Target a single, specific account.
+
+**Use case**: Eliminating a known intercompany receivable account.
+
+```typescript
+{
+  _tag: "ById",
+  accountId: "123e4567-e89b-12d3-a456-426614174000"
+}
+```
+
+### By Account Number Range
+
+Target all accounts within an account number range.
+
+**Use case**: All intercompany accounts in range 9000-9099.
+
+```typescript
+{
+  _tag: "ByRange",
+  fromAccountNumber: "9000",
+  toAccountNumber: "9099"
+}
+```
+
+### By Account Category
+
+Target all accounts of a specific category.
+
+**Use case**: All current asset or current liability accounts.
+
+```typescript
+{
+  _tag: "ByCategory",
+  category: "CurrentAsset"
+}
+```
+
+<Info>
+You can use multiple selectors in a single rule. The rule triggers if **any** selector matches (OR logic).
+</Info>
+
+## Rule Execution Priority
+
+When multiple elimination rules apply during a consolidation run, they execute in priority order:
+
+1. **Sort by priority** - Rules with lower priority numbers execute first
+2. **Execute in sequence** - Each rule generates its elimination entries
+3. **Apply all eliminations** - All entries are posted before calculating the final consolidated trial balance
+
+<Warning>
+Priority matters when rules depend on each other. For example, eliminate intercompany revenue/expense (priority 10) before unrealized profit in inventory (priority 20).
+</Warning>
+
+## Automatic vs. Manual Processing
+
+### Automatic Processing
+
+When enabled, the rule automatically generates elimination entries during every consolidation run without manual review.
+
+**Use for**:
+- Well-understood, recurring eliminations
+- Simple receivable/payable eliminations
+- Standardized intercompany transactions
+
+### Manual Processing
+
+When disabled, the rule requires manual review and approval before posting elimination entries.
+
+**Use for**:
+- Complex unrealized profit calculations
+- One-time or unusual eliminations
+- New elimination types during testing phase
+
+<Note>
+You can review all proposed elimination entries before finalizing a consolidation run, even for automatic rules. This provides an audit trail and opportunity to verify amounts.
+</Note>
+
+## Viewing Elimination Entries
+
+After a consolidation run, you can view all generated elimination entries:
+
+1. Navigate to the **Consolidation Run** details
+2. Click the **Eliminations** tab
+3. Review each elimination entry showing:
+   - Source rule
+   - Debit and credit accounts
+   - Amount eliminated
+   - Impact on consolidated balances
+
+## Example Elimination Rules
+
+### Example 1: Intercompany AR/AP
+
+**Scenario**: Eliminate all receivables and payables in accounts 9000-9099.
+
+```yaml
+Rule Name: Eliminate IC Receivables/Payables
+Type: IntercompanyReceivablePayable
+Source Accounts:
+  - ByRange: 9000 to 9099 (Receivables)
+Target Accounts:
+  - ByRange: 9000 to 9099 (Payables)
+Debit Account: 9050 (IC Payable)
+Credit Account: 9010 (IC Receivable)
+Automatic: Yes
+Priority: 10
+```
+
+### Example 2: Intercompany Sales
+
+**Scenario**: Eliminate all sales revenue and COGS for intercompany transactions.
+
+```yaml
+Rule Name: Eliminate IC Sales and COGS
+Type: IntercompanyRevenueExpense
+Source Accounts:
+  - ById: [Intercompany Sales Account]
+Target Accounts:
+  - ById: [Intercompany COGS Account]
+Debit Account: 4500 (IC Sales Revenue)
+Credit Account: 5500 (IC Cost of Sales)
+Automatic: Yes
+Priority: 10
+```
+
+### Example 3: Unrealized Inventory Profit
+
+**Scenario**: Eliminate profit on inventory still held by group members.
+
+```yaml
+Rule Name: Eliminate Unrealized Inventory Profit
+Type: UnrealizedProfitInventory
+Source Accounts:
+  - ByCategory: CurrentAsset (Inventory)
+Target Accounts:
+  - ById: [COGS Account]
+Debit Account: 4500 (IC Sales)
+Credit Account: 1200 (Inventory)
+Minimum Amount: $1,000
+Automatic: No (requires review)
+Priority: 20
+```
+
+<Info>
+Unrealized profit eliminations often require manual calculation based on markup percentages and quantities on hand. Consider using manual processing with supporting documentation.
+</Info>
+
+## Testing Elimination Rules
+
+Before activating automatic processing:
+
+<Steps>
+
+### Create test consolidation run
+
+Run a consolidation for a prior period where you know the expected elimination amounts.
+
+### Review proposed eliminations
+
+With the rule set to manual processing, review all proposed elimination entries.
+
+### Verify amounts and accounts
+
+Confirm:
+- Amounts match your manual calculations
+- Correct accounts are debited and credited
+- No unexpected eliminations are generated
+
+### Enable automatic processing
+
+Once verified, enable automatic processing for future consolidation runs.
+
+</Steps>
+
+## Troubleshooting
+
+<AccordionGroup>
+
+<Accordion title="Elimination rule isn't triggering">
+**Check**:
+- Rule is active
+- Source account selectors match actual account numbers/categories
+- Transaction amount exceeds minimum threshold (if set)
+- Rule priority isn't causing it to be skipped
+</Accordion>
+
+<Accordion title="Elimination amounts are incorrect">
+**Verify**:
+- Debit and credit accounts are correct
+- Account selectors are capturing all intended accounts
+- No duplicate rules are eliminating the same transactions
+- Intercompany transactions are properly flagged in the source data
+</Accordion>
+
+<Accordion title="Consolidation run fails during elimination step">
+**Review**:
+- Elimination entries are balanced (debits = credits)
+- Target accounts exist and are active
+- No circular dependencies between elimination rules
+- Error messages in the consolidation run log
+</Accordion>
+
+</AccordionGroup>
+
+## Best Practices
+
+1. **Start simple** - Create basic rules first (receivables/payables, revenue/expense) before tackling complex unrealized profit eliminations
+
+2. **Use consistent account numbering** - Designate a specific account range (e.g., 9000-9999) for all intercompany accounts across all group companies
+
+3. **Document assumptions** - Add detailed descriptions to rules explaining calculation methods and assumptions
+
+4. **Test in manual mode** - Always test new rules with manual processing before enabling automatic mode
+
+5. **Review quarterly** - Quarterly review all elimination rules to ensure they're still appropriate and complete
+
+6. **Reconcile regularly** - Don't wait until consolidation time to identify intercompany discrepancies
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Intercompany Transactions" icon="arrow-right-arrow-left" href="/advanced/intercompany-transactions">
+    Track and reconcile intercompany transactions
+  </Card>
+  <Card title="Consolidation" icon="layer-group" href="/advanced/consolidation">
+    Learn about the full consolidation process
+  </Card>
+</CardGroup>

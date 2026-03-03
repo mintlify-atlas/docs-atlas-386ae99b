@@ -1,0 +1,791 @@
+---
+title: Effect Framework
+description: Effect-TS patterns, layers, services, and best practices in Accountability
+---
+
+## Introduction
+
+Accountability uses **Effect-TS** as the foundation for all backend code (packages/core, persistence, api). Effect provides type-safe error handling, dependency injection, and composable functional patterns.
+
+<Note>
+  Effect is **backend only**. The frontend (packages/web) uses standard React patterns with no Effect code.
+</Note>
+
+## Why Effect?
+
+### Type-Safe Error Handling
+
+**Problem**: JavaScript's `try/catch` doesn't track errors in types.
+
+```typescript
+// Traditional approach - error type is lost
+function findAccount(id: string): Account {
+  // Throws AccountNotFound, DatabaseError, ValidationError?
+  // TypeScript can't help you here!
+}
+
+// Effect approach - errors in the type signature
+function findAccount(id: AccountId): Effect.Effect<
+  Account,
+  AccountNotFound | PersistenceError
+> {
+  // TypeScript knows exactly what can go wrong
+}
+```
+
+### Composable Effects
+
+**Problem**: Async operations with error handling get messy fast.
+
+```typescript
+// Traditional approach - nested error handling
+async function createJournalEntry(data: CreateEntryData) {
+  try {
+    const company = await companyRepo.findById(data.companyId)
+    if (!company) throw new Error("Company not found")
+    
+    try {
+      const accounts = await accountRepo.findByIds(data.accountIds)
+      if (accounts.length !== data.accountIds.length) {
+        throw new Error("Some accounts not found")
+      }
+      
+      try {
+        const entry = await entryRepo.create(data)
+        return entry
+      } catch (e) {
+        throw new Error("Failed to create entry")
+      }
+    } catch (e) {
+      throw new Error("Failed to load accounts")
+    }
+  } catch (e) {
+    throw new Error("Failed to load company")
+  }
+}
+
+// Effect approach - flat, composable
+const createJournalEntry = (data: CreateEntryData) =>
+  Effect.gen(function* () {
+    const companyRepo = yield* CompanyRepository
+    const accountRepo = yield* AccountRepository
+    const entryRepo = yield* JournalEntryRepository
+    
+    const company = yield* companyRepo.getById(data.companyId)
+    const accounts = yield* accountRepo.getByIds(data.accountIds)
+    const entry = yield* entryRepo.create(data)
+    
+    return entry
+  })
+```
+
+### Dependency Injection
+
+**Problem**: Mocking dependencies for testing is painful.
+
+```typescript
+// Traditional approach - manual DI
+class JournalEntryService {
+  constructor(
+    private companyRepo: CompanyRepository,
+    private accountRepo: AccountRepository,
+    private entryRepo: JournalEntryRepository
+  ) {}
+}
+
+// Effect approach - automatic DI with Context
+const createEntry = (data: CreateEntryData) =>
+  Effect.gen(function* () {
+    // Dependencies injected automatically
+    const companyRepo = yield* CompanyRepository
+    const accountRepo = yield* AccountRepository
+    const entryRepo = yield* JournalEntryRepository
+    // ...
+  })
+```
+
+## Core Concepts
+
+### Effect&lt;Success, Error, Requirements&gt;
+
+```typescript
+Effect.Effect<A, E, R>
+  // A = Success type (what the effect produces)
+  // E = Error type (what can go wrong)
+  // R = Requirements (services needed to run)
+```
+
+**Examples**:
+
+```typescript
+// Infallible effect with no dependencies
+const effect1: Effect.Effect<number, never, never> =
+  Effect.succeed(42)
+
+// Effect that might fail, no dependencies
+const effect2: Effect.Effect<Account, AccountNotFound, never> =
+  Effect.fail(new AccountNotFound({ id: "acc_123" }))
+
+// Effect with dependencies
+const effect3: Effect.Effect<Account, PersistenceError, AccountRepository> =
+  Effect.gen(function* () {
+    const repo = yield* AccountRepository
+    return yield* repo.findById(accountId)
+  })
+```
+
+### Effect Generators
+
+Use `Effect.gen` to write imperative-style code that's actually functional:
+
+```typescript
+const createAccount = (data: CreateAccountData) =>
+  Effect.gen(function* () {
+    // Yield effects to unwrap their values
+    const repo = yield* AccountRepository
+    const company = yield* CompanyRepository
+    
+    // Validate company exists
+    const companyExists = yield* company.findById(data.companyId)
+    if (Option.isNone(companyExists)) {
+      return yield* Effect.fail(new CompanyNotFound({ id: data.companyId }))
+    }
+    
+    // Create account
+    const account = Account.make({
+      id: AccountId.make(generateId()),
+      companyId: data.companyId,
+      name: data.name,
+      accountType: data.accountType,
+      isActive: true
+    })
+    
+    // Persist
+    return yield* repo.create(account)
+  })
+```
+
+<Info>
+  **Always use `yield*` (not `yield`)** when unwrapping effects. The asterisk is required!
+</Info>
+
+## Service Pattern
+
+### Defining Services
+
+```typescript
+import * as Context from "effect/Context"
+import * as Effect from "effect/Effect"
+
+// Service interface
+export interface AccountRepository {
+  readonly findById: (
+    organizationId: OrganizationId,
+    id: AccountId
+  ) => Effect.Effect<Option.Option<Account>, PersistenceError>
+  
+  readonly create: (
+    account: Account
+  ) => Effect.Effect<Account, PersistenceError>
+}
+
+// Service tag for dependency injection
+export class AccountRepository extends Context.Tag("AccountRepository")<
+  AccountRepository,
+  AccountRepository
+>() {}
+```
+
+### Implementing Services
+
+```typescript
+import { SqlClient } from "@effect/sql"
+
+const make = Effect.gen(function* () {
+  const sql = yield* SqlClient.SqlClient
+  
+  const findById = (
+    organizationId: OrganizationId,
+    id: AccountId
+  ) =>
+    SqlSchema.findOne({
+      Request: Schema.Struct({ organizationId, id }),
+      Result: AccountRow,
+      execute: ({ organizationId, id }) => sql`
+        SELECT a.*
+        FROM accounts a
+        JOIN companies c ON c.id = a.company_id
+        WHERE a.id = ${id}
+          AND c.organization_id = ${organizationId}
+      `
+    })({ organizationId, id })
+  
+  const create = (account: Account) =>
+    sql`
+      INSERT INTO accounts ${sql.insert(account)}
+      RETURNING *
+    `.pipe(
+      sql.withTransaction,
+      SqlSchema.single({ Result: AccountRow })
+    )
+  
+  return {
+    findById,
+    create
+  }
+})
+
+export const AccountRepositoryLive = Layer.effect(AccountRepository, make)
+```
+
+## Layer Pattern
+
+Layers are Effect's way of providing services to effects that need them.
+
+### Layer Types
+
+#### Layer.effect - Simple Service Creation
+
+Use when service creation is effectful but doesn't need cleanup:
+
+```typescript
+const make = Effect.gen(function* () {
+  const sql = yield* SqlClient.SqlClient
+  const config = yield* Config
+  
+  return {
+    findById: (id) => { /* ... */ },
+    create: (account) => { /* ... */ }
+  }
+})
+
+export const AccountRepositoryLive = Layer.effect(AccountRepository, make)
+//                                    ^^^^^^^^^^^^^ converts Effect to Layer
+```
+
+#### Layer.scoped - Resource Management
+
+Use when service needs cleanup (connections, subscriptions, file handles):
+
+```typescript
+const make = Effect.gen(function* () {
+  const sql = yield* SqlClient.SqlClient
+  
+  // Create a PubSub for account change notifications
+  const changes = yield* PubSub.unbounded<AccountChange>()
+  
+  // Listen to Postgres NOTIFY (needs cleanup)
+  yield* Effect.forkScoped(
+    sql`LISTEN account_changes`.pipe(
+      Stream.runForEach((change) => PubSub.publish(changes, change))
+    )
+  )
+  
+  return {
+    findById: (id) => { /* ... */ },
+    subscribe: PubSub.subscribe(changes)
+  }
+})
+
+export const AccountRepositoryLive = Layer.scoped(AccountRepository, make)
+//                                    ^^^^^^^^^^^^^ automatic cleanup
+```
+
+#### Layer.succeed - Pure Values (Avoid!)
+
+<Warning>
+  **Avoid `Layer.succeed` and `Tag.of`** - they bypass effectful construction and testing isolation. Use `Layer.effect` instead.
+</Warning>
+
+```typescript
+// BAD - creates service immediately (not lazy)
+export const ConfigLive = Layer.succeed(Config, {
+  databaseUrl: process.env.DATABASE_URL,
+  apiKey: process.env.API_KEY
+})
+
+// GOOD - deferred construction, testable
+const make = Effect.gen(function* () {
+  const databaseUrl = yield* Config.redacted("DATABASE_URL")
+  const apiKey = yield* Config.redacted("API_KEY")
+  return { databaseUrl, apiKey }
+})
+
+export const ConfigLive = Layer.effect(Config, make)
+```
+
+### Composing Layers
+
+```typescript
+// Merge layers (parallel composition)
+const AppLayers = Layer.mergeAll(
+  AccountRepositoryLive,
+  CompanyRepositoryLive,
+  JournalEntryRepositoryLive
+)
+
+// Provide dependencies to layer
+const AppLayersWithDb = AppLayers.pipe(
+  Layer.provide(PgClientLive),
+  Layer.provide(ConfigLive)
+)
+
+// Provide layers to an effect
+const program = createAccount(data).pipe(
+  Effect.provide(AppLayersWithDb)
+)
+
+// Run the effect
+const result = await Effect.runPromise(program)
+```
+
+### Layer Memoization
+
+**Layers are memoized by object identity**, not by type:
+
+```typescript
+// Same layer reference = shared instance
+const layer = AccountRepositoryLive
+const composed = Layer.mergeAll(layer, layer) // Single instance
+
+// Different references = separate instances
+const layer1 = AccountRepositoryLive
+const layer2 = AccountRepositoryLive
+const composed2 = Layer.mergeAll(layer1, layer2) // Two instances!
+```
+
+**Use `Layer.fresh` to escape memoization**:
+
+```typescript
+const createTestLayer = (config: TestConfig) => {
+  const ConfigLayer = Layer.effect(Config, Effect.succeed(config))
+  
+  // Without Layer.fresh, all tests share the same AuthService instance
+  return Layer.fresh(AuthServiceLive).pipe(
+    Layer.provide(ConfigLayer)
+  )
+}
+```
+
+## Error Handling
+
+### Schema.TaggedError
+
+All domain errors use `Schema.TaggedError`:
+
+```typescript
+export class AccountNotFound extends Schema.TaggedError<AccountNotFound>()()
+  "AccountNotFound",
+  { accountId: AccountId }
+) {
+  get message(): string {
+    return `Account not found: ${this.accountId}`
+  }
+}
+
+// Automatic type guard
+export const isAccountNotFound = Schema.is(AccountNotFound)
+```
+
+### Error Handling Operators
+
+```typescript
+// catchTag - handle specific error type
+findAccount(id).pipe(
+  Effect.catchTag("AccountNotFound", (error) =>
+    Effect.succeed(createDefaultAccount())
+  )
+)
+
+// mapError - transform error
+findAccount(id).pipe(
+  Effect.mapError((error) => new DomainError({ cause: error }))
+)
+
+// orElse - fallback effect
+findAccount(id).pipe(
+  Effect.orElse(() => fetchFromCache(id))
+)
+
+// catchAll - handle all errors (preserves error type)
+findAccount(id).pipe(
+  Effect.catchAll((error) => {
+    if (Schema.is(AccountNotFound)(error)) {
+      return Effect.succeed(null)
+    }
+    return Effect.fail(error)
+  })
+)
+```
+
+<Warning>
+  **NEVER use `Effect.catchAllCause`** - it catches defects (bugs) which should crash the program. Use `catchAll` or `mapError` instead.
+</Warning>
+
+### Three-Layer Error Architecture
+
+```
+Persistence Errors      →  Domain Errors        →  API Errors
+PersistenceError          AccountNotFound        404 Not Found
+SqlError                  ValidationError        422 Unprocessable Entity
+ConnectionError           UnauthorizedError      401 Unauthorized
+```
+
+**Mapping errors across layers**:
+
+```typescript
+// Persistence → Domain
+const findAccount = (id: AccountId) =>
+  repo.findById(id).pipe(
+    Effect.flatMap(
+      Option.match({
+        onNone: () => Effect.fail(new AccountNotFound({ id })),
+        onSome: Effect.succeed
+      })
+    )
+  )
+
+// Domain → API
+HttpApiBuilder.handle("getAccount", ({ path }) =>
+  accountService.findById(path.id).pipe(
+    // Errors automatically mapped to HTTP status codes
+    // AccountNotFound → 404
+    // ValidationError → 422
+  )
+)
+```
+
+## Schema Patterns
+
+### Schema.Class for Entities
+
+```typescript
+export class Account extends Schema.Class<Account>("Account")({
+  id: AccountId,
+  companyId: CompanyId,
+  accountNumber: AccountNumber,
+  name: Schema.NonEmptyTrimmedString,
+  accountType: AccountType,
+  category: AccountCategory,
+  isActive: Schema.Boolean,
+  createdAt: Timestamp,
+  updatedAt: Timestamp
+}) {
+  // Custom methods
+  get isBalanceSheet(): boolean {
+    return ["Asset", "Liability", "Equity"].includes(this.accountType)
+  }
+  
+  get isProfitLoss(): boolean {
+    return ["Revenue", "Expense"].includes(this.accountType)
+  }
+}
+
+// Usage
+const account = Account.make({
+  id: AccountId.make("acc_123"),
+  // ...
+})
+
+// Automatic Equal and Hash
+Equal.equals(account1, account2) // Structural equality
+```
+
+### Branded Types
+
+```typescript
+export const AccountId = Schema.NonEmptyTrimmedString.pipe(
+  Schema.brand("AccountId")
+)
+export type AccountId = typeof AccountId.Type
+
+// Prevents mixing up different ID types
+const accountId: AccountId = AccountId.make("acc_123")
+const companyId: CompanyId = CompanyId.make("comp_456")
+
+findAccount(companyId) // TypeScript error! ✓
+```
+
+### Option and Nullable Fields
+
+```typescript
+// Use Schema.Option for optional fields
+export class Account extends Schema.Class<Account>("Account")({
+  id: AccountId,
+  name: Schema.String,
+  parentAccountId: Schema.Option(AccountId), // Option<AccountId>
+  description: Schema.Option(Schema.String)  // Option<string>
+}) {}
+
+// JSON encoding:
+// { parentAccountId: null } or { parentAccountId: "acc_123" }
+
+// Use Schema.OptionFromNullOr for nullable values from external sources
+const ApiResponse = Schema.Struct({
+  parentId: Schema.OptionFromNullOr(AccountId)
+})
+```
+
+### Validation and Transformations
+
+```typescript
+// String transformations
+export const Email = Schema.String.pipe(
+  Schema.trim,
+  Schema.lowercase,
+  Schema.pattern(/^[^@]+@[^@]+\.[^@]+$/),
+  Schema.brand("Email")
+)
+
+// Number constraints
+export const Percentage = Schema.Number.pipe(
+  Schema.greaterThanOrEqualTo(0),
+  Schema.lessThanOrEqualTo(100),
+  Schema.brand("Percentage")
+)
+
+// Date transformations
+export const LocalDate = Schema.String.pipe(
+  Schema.pattern(/^\d{4}-\d{2}-\d{2}$/),
+  Schema.brand("LocalDate")
+)
+
+// Custom transformations
+export const MonetaryAmount = Schema.transform(
+  Schema.String,
+  Schema.Number,
+  {
+    decode: (s) => parseFloat(s),
+    encode: (n) => n.toFixed(2)
+  }
+)
+```
+
+## SQL Patterns
+
+### SqlSchema Helpers
+
+```typescript
+import { SqlSchema } from "@effect/sql"
+
+// findOne - returns Option<T>
+const findById = SqlSchema.findOne({
+  Request: AccountId,
+  Result: AccountRow,
+  execute: (id) => sql`SELECT * FROM accounts WHERE id = ${id}`
+})
+
+// findAll - returns Array<T>
+const findByCompany = SqlSchema.findAll({
+  Request: CompanyId,
+  Result: AccountRow,
+  execute: (companyId) => sql`
+    SELECT * FROM accounts WHERE company_id = ${companyId}
+  `
+})
+
+// single - expects exactly 1 result (fails if 0 or >1)
+const getById = SqlSchema.single({
+  Request: AccountId,
+  Result: AccountRow,
+  execute: (id) => sql`SELECT * FROM accounts WHERE id = ${id}`
+})
+
+// void - for INSERT/UPDATE/DELETE with no return
+const deleteById = SqlSchema.void({
+  Request: AccountId,
+  execute: (id) => sql`DELETE FROM accounts WHERE id = ${id}`
+})
+```
+
+### SQL Helpers
+
+```typescript
+// Insert
+sql`INSERT INTO accounts ${sql.insert(account)}`
+sql`INSERT INTO accounts ${sql.insert([account1, account2, account3])}`
+
+// Update
+sql`UPDATE accounts SET ${sql.update({ name: "New Name" })} WHERE id = ${id}`
+
+// IN clause
+sql`SELECT * FROM accounts WHERE id IN ${sql.in(accountIds)}`
+
+// AND conditions
+sql`SELECT * FROM accounts WHERE ${sql.and([
+  sql`company_id = ${companyId}`,
+  sql`is_active = true`
+])}`
+```
+
+### Transactions
+
+```typescript
+const createWithAudit = (account: Account) =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient
+    
+    return yield* sql.withTransaction(
+      Effect.gen(function* () {
+        yield* sql`INSERT INTO accounts ${sql.insert(account)}`
+        yield* sql`INSERT INTO audit_log ${sql.insert({
+          entityType: "account",
+          entityId: account.id,
+          action: "create"
+        })}`
+        return account
+      })
+    )
+  })
+```
+
+## Testing with @effect/vitest
+
+### Test Variants
+
+```typescript
+import { describe, it, expect, layer } from "@effect/vitest"
+
+// it.effect - Most tests (TestClock for fast time)
+it.effect("processes after delay", () =>
+  Effect.gen(function* () {
+    const fiber = yield* Effect.fork(
+      Effect.sleep(Duration.minutes(5)).pipe(Effect.map(() => "done"))
+    )
+    yield* TestClock.adjust(Duration.minutes(5)) // No real waiting!
+    const result = yield* Fiber.join(fiber)
+    expect(result).toBe("done")
+  })
+)
+
+// it.live - When you need real time/IO
+it.live("fetches from real API", () =>
+  Effect.gen(function* () {
+    const response = yield* Effect.promise(() => fetch("https://api.example.com"))
+    expect(response.status).toBe(200)
+  })
+)
+
+// it.scoped - When you need resource cleanup
+it.scoped("manages resource lifecycle", () =>
+  Effect.gen(function* () {
+    const resource = yield* acquireResource()
+    // resource automatically released after test
+    expect(resource.isOpen).toBe(true)
+  })
+)
+```
+
+### Sharing Layers Between Tests
+
+```typescript
+layer(AccountServiceLive)("AccountService", (it) => {
+  it.effect("finds account by id", () =>
+    Effect.gen(function* () {
+      const service = yield* AccountService
+      const account = yield* service.findById(testAccountId)
+      expect(account.name).toBe("Cash")
+    })
+  )
+  
+  it.effect("creates new account", () =>
+    Effect.gen(function* () {
+      const service = yield* AccountService
+      const account = yield* service.create(newAccountData)
+      expect(account.id).toBeDefined()
+    })
+  )
+})
+```
+
+### Property-Based Testing
+
+```typescript
+import { FastCheck } from "effect"
+
+it.effect.prop(
+  "account creation is idempotent",
+  [Schema.String, FastCheck.integer()],
+  ([name, accountNumber]) =>
+    Effect.gen(function* () {
+      const service = yield* AccountService
+      const account1 = yield* service.create({ name, accountNumber })
+      const account2 = yield* service.create({ name, accountNumber })
+      expect(account1.id).toBe(account2.id)
+    })
+)
+```
+
+## Critical Rules
+
+<Warning>
+  Violating these rules will cause bugs or make testing impossible:
+</Warning>
+
+### 1. Never Use `any` or Type Casts
+
+```typescript
+// WRONG
+const account = data as Account
+const id: any = someValue
+
+// RIGHT
+const account = yield* Schema.decodeUnknown(Account)(data)
+const id = AccountId.make(someValue)
+```
+
+### 2. Never Use `catchAll` on `never` Error Type
+
+```typescript
+// WRONG - effect never fails, catchAll is useless
+Effect.succeed(42).pipe(
+  Effect.catchAll((e) => Effect.fail(new MyError({ cause: e })))
+)
+
+// RIGHT - only catch when E is not never
+findAccount(id).pipe(
+  Effect.catchAll((e) => Effect.fail(new MyError({ cause: e })))
+)
+```
+
+### 3. Never Use `disableValidation: true`
+
+```typescript
+// WRONG - banned by lint rule
+const account = Account.make(data, { disableValidation: true })
+
+// RIGHT - let Schema validate
+const account = Account.make(data)
+```
+
+### 4. Never Use `*FromSelf` Schemas
+
+```typescript
+// WRONG
+parentId: Schema.OptionFromSelf(AccountId)
+
+// RIGHT
+parentId: Schema.Option(AccountId)
+```
+
+### 5. Never Silently Swallow Errors
+
+```typescript
+// WRONG - silently discards errors
+yield* auditLog(entry).pipe(
+  Effect.catchAll(() => Effect.void)
+)
+
+// RIGHT - let error propagate or transform it
+yield* auditLog(entry) // Error visible in types
+yield* auditLog(entry).pipe(
+  Effect.mapError((e) => new AuditError({ cause: e }))
+)
+```
+
+## Next Steps
+
+- [Domain Model](/architecture/domain-model) - Business entities using Effect Schema
+- [Persistence](/architecture/persistence) - SQL patterns with @effect/sql
+- [Error Handling](/architecture/error-handling) - Comprehensive error strategy
+- [Testing](/architecture/testing) - Testing patterns with @effect/vitest

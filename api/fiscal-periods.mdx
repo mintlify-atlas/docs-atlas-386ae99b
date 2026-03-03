@@ -1,0 +1,439 @@
+---
+title: Fiscal Periods API
+description: Manage fiscal years and periods with open/close workflows and year-end close
+---
+
+# Fiscal Periods API
+
+The Fiscal Periods API provides comprehensive management of fiscal years and periods, including period open/close workflows, year-end close, and date constraints for journal entries.
+
+## Base Path
+
+```
+/api/v1/organizations/{organizationId}/companies/{companyId}
+```
+
+All endpoints require authentication with a valid session token.
+
+## Period Status Model
+
+Fiscal periods use a simple 2-state model:
+
+- **Open** - Accepts journal entries and modifications
+- **Closed** - No journal entries allowed (read-only)
+
+Periods can be reopened with full audit trail tracking.
+
+## Period 13 (Adjustment Period)
+
+All fiscal years automatically include **Period 13** - a mandatory adjustment period for year-end adjustments and consolidation compatibility per US GAAP.
+
+## Fiscal Years
+
+### List Fiscal Years
+
+Retrieve all fiscal years for a company.
+
+```bash GET /api/v1/organizations/{organizationId}/companies/{companyId}/fiscal-years
+curl -X GET "https://your-instance.accountability.app/api/v1/organizations/{orgId}/companies/{companyId}/fiscal-years" \
+  -H "Authorization: Bearer your-session-token"
+```
+
+<ResponseExample>
+```json
+{
+  "fiscalYears": [
+    {
+      "id": "fy_123e4567-e89b-12d3-a456-426614174000",
+      "companyId": "comp_123e4567-e89b-12d3-a456-426614174000",
+      "year": 2025,
+      "name": "FY 2025",
+      "startDate": "2025-01-01",
+      "endDate": "2025-12-31",
+      "status": "Open",
+      "includesAdjustmentPeriod": true,
+      "createdAt": "2025-01-01T00:00:00Z",
+      "updatedAt": "2025-01-01T00:00:00Z"
+    },
+    {
+      "id": "fy_987e6543-e21b-12d3-a456-426614174000",
+      "companyId": "comp_123e4567-e89b-12d3-a456-426614174000",
+      "year": 2024,
+      "name": "FY 2024",
+      "startDate": "2024-01-01",
+      "endDate": "2024-12-31",
+      "status": "Closed",
+      "includesAdjustmentPeriod": true,
+      "createdAt": "2024-01-01T00:00:00Z",
+      "updatedAt": "2025-01-15T10:00:00Z"
+    }
+  ],
+  "total": 2
+}
+```
+</ResponseExample>
+
+### Get Fiscal Year
+
+Retrieve a single fiscal year by ID.
+
+```bash GET /api/v1/organizations/{organizationId}/companies/{companyId}/fiscal-years/{fiscalYearId}
+curl -X GET "https://your-instance.accountability.app/api/v1/organizations/{orgId}/companies/{companyId}/fiscal-years/{fiscalYearId}" \
+  -H "Authorization: Bearer your-session-token"
+```
+
+### Create Fiscal Year
+
+Create a new fiscal year with auto-generated monthly periods (1-12) plus Period 13.
+
+```bash POST /api/v1/organizations/{organizationId}/companies/{companyId}/fiscal-years
+curl -X POST "https://your-instance.accountability.app/api/v1/organizations/{orgId}/companies/{companyId}/fiscal-years" \
+  -H "Authorization: Bearer your-session-token" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "year": 2026,
+    "name": "FY 2026",
+    "startDate": "2026-01-01",
+    "endDate": "2026-12-31"
+  }'
+```
+
+<ParamField body="year" type="integer" required>
+  Fiscal year number (1900-2999)
+</ParamField>
+
+<ParamField body="name" type="string">
+  Optional custom name (defaults to "FY {year}")
+</ParamField>
+
+<ParamField body="startDate" type="string" required>
+  Fiscal year start date (ISO 8601: YYYY-MM-DD)
+</ParamField>
+
+<ParamField body="endDate" type="string" required>
+  Fiscal year end date (ISO 8601: YYYY-MM-DD)
+</ParamField>
+
+<Note>
+Period 13 (adjustment period) is **always created automatically**. This is mandatory for consolidation compatibility and audit compliance.
+</Note>
+
+### Close Fiscal Year (Year-End Close)
+
+Execute year-end closing workflow:
+1. Generate closing journal entries to transfer income statement balances to retained earnings
+2. Close all open periods
+3. Set fiscal year status to Closed
+
+```bash POST /api/v1/organizations/{organizationId}/companies/{companyId}/fiscal-years/{fiscalYearId}/close
+curl -X POST "https://your-instance.accountability.app/api/v1/organizations/{orgId}/companies/{companyId}/fiscal-years/{fiscalYearId}/close" \
+  -H "Authorization: Bearer your-session-token"
+```
+
+<ResponseExample>
+```json
+{
+  "fiscalYearId": "fy_123e4567-e89b-12d3-a456-426614174000",
+  "closedAt": "2026-01-15T10:30:00Z",
+  "closedBy": "user_123e4567-e89b-12d3-a456-426614174000",
+  "closingJournalEntries": [
+    {
+      "id": "je_close_revenue",
+      "description": "Year-end close: Revenue accounts to Retained Earnings",
+      "amount": "1500000.00"
+    },
+    {
+      "id": "je_close_expense",
+      "description": "Year-end close: Expense accounts to Retained Earnings",
+      "amount": "1200000.00"
+    }
+  ],
+  "netIncome": "300000.00",
+  "retainedEarningsAccountId": "acc_retain_123"
+}
+```
+</ResponseExample>
+
+<Warning>
+**Prerequisites:**
+- Retained earnings account must be configured in Company Settings
+- Trial balance must be balanced
+- Fiscal year must be Open
+</Warning>
+
+### Reopen Fiscal Year
+
+Reverse year-end close by creating reversal entries and reopening all periods.
+
+```bash POST /api/v1/organizations/{organizationId}/companies/{companyId}/fiscal-years/{fiscalYearId}/reopen
+curl -X POST "https://your-instance.accountability.app/api/v1/organizations/{orgId}/companies/{companyId}/fiscal-years/{fiscalYearId}/reopen" \
+  -H "Authorization: Bearer your-session-token"
+```
+
+<Warning>
+Use with caution - this is typically for correction scenarios only.
+</Warning>
+
+### Preview Year-End Close
+
+Get a preview of year-end close without making changes.
+
+```bash GET /api/v1/organizations/{organizationId}/companies/{companyId}/fiscal-years/{fiscalYearId}/close/preview
+curl -X GET "https://your-instance.accountability.app/api/v1/organizations/{orgId}/companies/{companyId}/fiscal-years/{fiscalYearId}/close/preview" \
+  -H "Authorization: Bearer your-session-token"
+```
+
+<ResponseExample>
+```json
+{
+  "netIncome": "300000.00",
+  "totalRevenue": "1500000.00",
+  "totalExpenses": "1200000.00",
+  "retainedEarningsAccountId": "acc_retain_123",
+  "retainedEarningsAccountName": "Retained Earnings",
+  "canClose": true,
+  "blockers": []
+}
+```
+</ResponseExample>
+
+## Fiscal Periods
+
+### List Fiscal Periods
+
+Retrieve all periods for a fiscal year.
+
+```bash GET /api/v1/organizations/{organizationId}/companies/{companyId}/fiscal-years/{fiscalYearId}/periods
+curl -X GET "https://your-instance.accountability.app/api/v1/organizations/{orgId}/companies/{companyId}/fiscal-years/{fiscalYearId}/periods" \
+  -H "Authorization: Bearer your-session-token"
+```
+
+<ParamField query="status" type="enum">
+  Filter by status: `Open`, `Closed`
+</ParamField>
+
+<ResponseExample>
+```json
+{
+  "periods": [
+    {
+      "id": "fp_123e4567-e89b-12d3-a456-426614174000",
+      "fiscalYearId": "fy_123e4567-e89b-12d3-a456-426614174000",
+      "periodNumber": 1,
+      "periodName": "January 2025",
+      "periodType": "Regular",
+      "startDate": "2025-01-01",
+      "endDate": "2025-01-31",
+      "status": "Open",
+      "reopenCount": 0,
+      "createdAt": "2025-01-01T00:00:00Z",
+      "updatedAt": "2025-01-01T00:00:00Z"
+    },
+    {
+      "id": "fp_period13",
+      "fiscalYearId": "fy_123e4567-e89b-12d3-a456-426614174000",
+      "periodNumber": 13,
+      "periodName": "Period 13 (Adjustments)",
+      "periodType": "Adjustment",
+      "startDate": "2025-12-31",
+      "endDate": "2025-12-31",
+      "status": "Open",
+      "reopenCount": 0,
+      "createdAt": "2025-01-01T00:00:00Z",
+      "updatedAt": "2025-01-01T00:00:00Z"
+    }
+  ],
+  "total": 13
+}
+```
+</ResponseExample>
+
+### Get Fiscal Period
+
+Retrieve a single period by ID.
+
+```bash GET /api/v1/organizations/{organizationId}/companies/{companyId}/fiscal-years/{fiscalYearId}/periods/{periodId}
+curl -X GET "https://your-instance.accountability.app/api/v1/organizations/{orgId}/companies/{companyId}/fiscal-years/{fiscalYearId}/periods/{periodId}" \
+  -H "Authorization: Bearer your-session-token"
+```
+
+### Open Fiscal Period
+
+Transition a period from Closed to Open status.
+
+```bash POST /api/v1/organizations/{organizationId}/companies/{companyId}/fiscal-years/{fiscalYearId}/periods/{periodId}/open
+curl -X POST "https://your-instance.accountability.app/api/v1/organizations/{orgId}/companies/{companyId}/fiscal-years/{fiscalYearId}/periods/{periodId}/open" \
+  -H "Authorization: Bearer your-session-token"
+```
+
+<Note>
+Requires `fiscal_period:manage` permission.
+</Note>
+
+### Close Fiscal Period
+
+Transition a period from Open to Closed status. No journal entries allowed after close.
+
+```bash POST /api/v1/organizations/{organizationId}/companies/{companyId}/fiscal-years/{fiscalYearId}/periods/{periodId}/close
+curl -X POST "https://your-instance.accountability.app/api/v1/organizations/{orgId}/companies/{companyId}/fiscal-years/{fiscalYearId}/periods/{periodId}/close" \
+  -H "Authorization: Bearer your-session-token"
+```
+
+### Get Period Reopen History
+
+Retrieve the audit history of all times a period has been reopened.
+
+```bash GET /api/v1/organizations/{organizationId}/companies/{companyId}/fiscal-years/{fiscalYearId}/periods/{periodId}/reopen-history
+curl -X GET "https://your-instance.accountability.app/api/v1/organizations/{orgId}/companies/{companyId}/fiscal-years/{fiscalYearId}/periods/{periodId}/reopen-history" \
+  -H "Authorization: Bearer your-session-token"
+```
+
+<ResponseExample>
+```json
+{
+  "history": [
+    {
+      "reopenedAt": "2025-02-05T14:30:00Z",
+      "reopenedBy": "user_123e4567-e89b-12d3-a456-426614174000",
+      "reason": "Correcting misposted entry",
+      "reclosedAt": "2025-02-05T16:00:00Z"
+    }
+  ],
+  "total": 1
+}
+```
+</ResponseExample>
+
+## Date Picker Support
+
+### Get Period Status for Date
+
+Check the fiscal period status for a specific date.
+
+```bash GET /api/v1/organizations/{organizationId}/companies/{companyId}/period-status?date=2025-03-15
+curl -X GET "https://your-instance.accountability.app/api/v1/organizations/{orgId}/companies/{companyId}/period-status?date=2025-03-15" \
+  -H "Authorization: Bearer your-session-token"
+```
+
+<ParamField query="date" type="string" required>
+  Date to check (ISO 8601: YYYY-MM-DD)
+</ParamField>
+
+<ResponseExample>
+```json
+{
+  "status": "Open",
+  "allowsJournalEntries": true,
+  "allowsModifications": true
+}
+```
+</ResponseExample>
+
+### Get Periods Summary
+
+Retrieve all periods with computed date ranges for date picker constraints.
+
+```bash GET /api/v1/organizations/{organizationId}/companies/{companyId}/fiscal-periods/summary
+curl -X GET "https://your-instance.accountability.app/api/v1/organizations/{orgId}/companies/{companyId}/fiscal-periods/summary" \
+  -H "Authorization: Bearer your-session-token"
+```
+
+<ResponseExample>
+```json
+{
+  "periods": [
+    {
+      "fiscalYearId": "fy_2025",
+      "fiscalYear": 2025,
+      "periodId": "fp_2025_01",
+      "periodNumber": 1,
+      "periodName": "January 2025",
+      "periodType": "Regular",
+      "startDate": "2025-01-01",
+      "endDate": "2025-01-31",
+      "status": "Open"
+    }
+  ],
+  "openDateRanges": [
+    { "startDate": "2025-01-01", "endDate": "2025-03-31" }
+  ],
+  "closedDateRanges": [
+    { "startDate": "2024-01-01", "endDate": "2024-12-31" }
+  ]
+}
+```
+</ResponseExample>
+
+<Note>
+Use this endpoint to:
+- Enable dates in open periods
+- Disable dates in closed periods with tooltip "Period is closed"
+- Disable dates with no period with tooltip "No fiscal period defined"
+</Note>
+
+## Error Responses
+
+<AccordionGroup>
+  <Accordion title="Fiscal Year Not Found (404)">
+    ```json
+    {
+      "_tag": "FiscalYearNotFoundError",
+      "fiscalYearId": "fy_123e4567-e89b-12d3-a456-426614174000",
+      "message": "Fiscal year not found"
+    }
+    ```
+  </Accordion>
+  
+  <Accordion title="Fiscal Period Not Found (404)">
+    ```json
+    {
+      "_tag": "FiscalPeriodNotFoundError",
+      "fiscalPeriodId": "fp_123e4567-e89b-12d3-a456-426614174000",
+      "message": "Fiscal period not found"
+    }
+    ```
+  </Accordion>
+  
+  <Accordion title="Fiscal Year Already Exists (409)">
+    ```json
+    {
+      "_tag": "FiscalYearAlreadyExistsError",
+      "companyId": "comp_123e4567-e89b-12d3-a456-426614174000",
+      "year": 2025,
+      "message": "Fiscal year 2025 already exists for this company"
+    }
+    ```
+  </Accordion>
+  
+  <Accordion title="Invalid Status Transition (400)">
+    ```json
+    {
+      "_tag": "InvalidStatusTransitionError",
+      "currentStatus": "Open",
+      "targetStatus": "Closed",
+      "message": "Invalid status transition from Open to Closed"
+    }
+    ```
+  </Accordion>
+  
+  <Accordion title="Retained Earnings Not Configured (400)">
+    ```json
+    {
+      "_tag": "RetainedEarningsNotConfiguredError",
+      "companyId": "comp_123e4567-e89b-12d3-a456-426614174000",
+      "message": "Retained earnings account must be configured in Company Settings before closing the fiscal year"
+    }
+    ```
+  </Accordion>
+  
+  <Accordion title="Year Already Closed (409)">
+    ```json
+    {
+      "_tag": "YearAlreadyClosedError",
+      "fiscalYearId": "fy_123e4567-e89b-12d3-a456-426614174000",
+      "closedAt": "2026-01-15T10:30:00Z",
+      "message": "Fiscal year is already closed"
+    }
+    ```
+  </Accordion>
+</AccordionGroup>

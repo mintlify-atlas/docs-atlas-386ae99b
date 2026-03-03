@@ -1,0 +1,368 @@
+---
+title: Intercompany Transactions API
+description: Manage intercompany transactions, reconciliation, and journal entry linking
+---
+
+# Intercompany Transactions API
+
+The Intercompany Transactions API provides endpoints for managing transactions between related companies within a consolidation group, including reconciliation and matching status updates.
+
+## Base Path
+
+```
+/api/v1/intercompany-transactions
+```
+
+All endpoints require authentication with a valid session token.
+
+## Intercompany Transaction Concepts
+
+Intercompany transactions track business activities between related companies:
+
+- **From Company** - The seller, lender, or service provider
+- **To Company** - The buyer, borrower, or service recipient
+- **Transaction Type** - Sale, loan, service, dividend, etc.
+- **Matching Status** - Matched, partially matched, unmatched, variance approved
+- **Journal Entry Links** - Links to JEs in both companies for reconciliation
+
+## Transaction Types
+
+- **Sale** - Goods sold from one company to another
+- **Service** - Services provided between companies
+- **Loan** - Intercompany loans and financing
+- **Dividend** - Dividends paid between parent and subsidiary
+- **Royalty** - Royalty payments for IP usage
+- **ManagementFee** - Management or administrative fees
+- **Other** - Other intercompany transactions
+
+## Matching Status
+
+- **Unmatched** - No corresponding entry found in counterparty
+- **Matched** - Perfectly matched with counterparty entry
+- **PartiallyMatched** - Matched but with variances
+- **VarianceApproved** - Variance documented and approved
+
+## List Intercompany Transactions
+
+Retrieve a paginated list with comprehensive filtering.
+
+```bash GET /api/v1/intercompany-transactions
+curl -X GET "https://your-instance.accountability.app/api/v1/intercompany-transactions?companyId={companyId}&matchingStatus=Unmatched" \
+  -H "Authorization: Bearer your-session-token"
+```
+
+<ParamField query="fromCompanyId" type="string">
+  Filter by from company UUID
+</ParamField>
+
+<ParamField query="toCompanyId" type="string">
+  Filter by to company UUID
+</ParamField>
+
+<ParamField query="companyId" type="string">
+  Filter by either from or to company UUID
+</ParamField>
+
+<ParamField query="transactionType" type="enum">
+  Filter by type: `Sale`, `Service`, `Loan`, `Dividend`, `Royalty`, `ManagementFee`, `Other`
+</ParamField>
+
+<ParamField query="matchingStatus" type="enum">
+  Filter by status: `Unmatched`, `Matched`, `PartiallyMatched`, `VarianceApproved`
+</ParamField>
+
+<ParamField query="startDate" type="string">
+  Filter by transaction date start (ISO 8601: YYYY-MM-DD)
+</ParamField>
+
+<ParamField query="endDate" type="string">
+  Filter by transaction date end (ISO 8601: YYYY-MM-DD)
+</ParamField>
+
+<ParamField query="requiresElimination" type="boolean">
+  Filter transactions requiring elimination during consolidation
+</ParamField>
+
+<ParamField query="unmatched" type="boolean">
+  Quick filter for unmatched transactions only
+</ParamField>
+
+<ParamField query="limit" type="integer" default="50">
+  Maximum items per page
+</ParamField>
+
+<ParamField query="offset" type="integer" default="0">
+  Number of items to skip
+</ParamField>
+
+<ResponseExample>
+```json
+{
+  "transactions": [
+    {
+      "id": "ict_123e4567-e89b-12d3-a456-426614174000",
+      "fromCompanyId": "comp_seller_123",
+      "toCompanyId": "comp_buyer_123",
+      "transactionType": "Sale",
+      "transactionDate": "2025-03-15",
+      "amount": { "value": "50000.00", "currency": "USD" },
+      "description": "Equipment sale - Invoice #INV-2025-0315",
+      "matchingStatus": "Matched",
+      "fromJournalEntryId": "je_seller_001",
+      "toJournalEntryId": "je_buyer_001",
+      "varianceAmount": null,
+      "varianceExplanation": null,
+      "requiresElimination": true,
+      "eliminatedInRunId": null,
+      "createdAt": "2025-03-15T10:00:00Z",
+      "updatedAt": "2025-03-15T14:30:00Z"
+    }
+  ],
+  "total": 1,
+  "limit": 50,
+  "offset": 0
+}
+```
+</ResponseExample>
+
+## Get Intercompany Transaction
+
+Retrieve a single transaction by ID.
+
+```bash GET /api/v1/intercompany-transactions/{id}
+curl -X GET "https://your-instance.accountability.app/api/v1/intercompany-transactions/{transactionId}" \
+  -H "Authorization: Bearer your-session-token"
+```
+
+<ParamField path="id" type="string" required>
+  Intercompany transaction UUID
+</ParamField>
+
+## Create Intercompany Transaction
+
+Create a new intercompany transaction with optional journal entry links.
+
+```bash POST /api/v1/intercompany-transactions
+curl -X POST "https://your-instance.accountability.app/api/v1/intercompany-transactions" \
+  -H "Authorization: Bearer your-session-token" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "organizationId": "org_123e4567-e89b-12d3-a456-426614174000",
+    "fromCompanyId": "comp_seller_123",
+    "toCompanyId": "comp_buyer_123",
+    "transactionType": "Sale",
+    "transactionDate": "2025-03-15",
+    "amount": { "value": "50000.00", "currency": "USD" },
+    "description": "Equipment sale - Invoice #INV-2025-0315",
+    "fromJournalEntryId": "je_seller_001",
+    "toJournalEntryId": "je_buyer_001"
+  }'
+```
+
+<ParamField body="organizationId" type="string" required>
+  Organization UUID
+</ParamField>
+
+<ParamField body="fromCompanyId" type="string" required>
+  From company UUID (seller/lender)
+</ParamField>
+
+<ParamField body="toCompanyId" type="string" required>
+  To company UUID (buyer/borrower)
+</ParamField>
+
+<ParamField body="transactionType" type="enum" required>
+  Transaction type: `Sale`, `Service`, `Loan`, `Dividend`, `Royalty`, `ManagementFee`, `Other`
+</ParamField>
+
+<ParamField body="transactionDate" type="string" required>
+  Transaction date (ISO 8601: YYYY-MM-DD)
+</ParamField>
+
+<ParamField body="amount" type="MonetaryAmount" required>
+  Transaction amount with currency
+  - `value` (string): Amount
+  - `currency` (string): ISO 4217 code
+</ParamField>
+
+<ParamField body="description" type="string">
+  Optional transaction description
+</ParamField>
+
+<ParamField body="fromJournalEntryId" type="string">
+  Optional from company journal entry UUID (can link during creation or later)
+</ParamField>
+
+<ParamField body="toJournalEntryId" type="string">
+  Optional to company journal entry UUID
+</ParamField>
+
+## Update Intercompany Transaction
+
+Update an existing transaction. Only provided fields are updated.
+
+```bash PUT /api/v1/intercompany-transactions/{id}
+curl -X PUT "https://your-instance.accountability.app/api/v1/intercompany-transactions/{transactionId}" \
+  -H "Authorization: Bearer your-session-token" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "description": "Updated description",
+    "amount": { "value": "50500.00", "currency": "USD" },
+    "varianceAmount": { "value": "500.00", "currency": "USD" },
+    "varianceExplanation": "Shipping charges included"
+  }'
+```
+
+<Note>
+Only certain fields can be updated depending on the transaction's matching status and elimination status.
+</Note>
+
+## Delete Intercompany Transaction
+
+Delete a transaction. Matched or eliminated transactions may not be deleted.
+
+```bash DELETE /api/v1/intercompany-transactions/{id}
+curl -X DELETE "https://your-instance.accountability.app/api/v1/intercompany-transactions/{transactionId}" \
+  -H "Authorization: Bearer your-session-token"
+```
+
+<Warning>
+Transactions that have been matched or eliminated in consolidation runs cannot be deleted.
+</Warning>
+
+## Update Matching Status
+
+Update the matching status during reconciliation.
+
+```bash POST /api/v1/intercompany-transactions/{id}/matching-status
+curl -X POST "https://your-instance.accountability.app/api/v1/intercompany-transactions/{transactionId}/matching-status" \
+  -H "Authorization: Bearer your-session-token" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "matchingStatus": "PartiallyMatched",
+    "varianceExplanation": "Timing difference: payment recorded in different period"
+  }'
+```
+
+<ParamField body="matchingStatus" type="enum" required>
+  New matching status: `Unmatched`, `Matched`, `PartiallyMatched`, `VarianceApproved`
+</ParamField>
+
+<ParamField body="varianceExplanation" type="string">
+  Explanation for variance (required for PartiallyMatched or VarianceApproved)
+</ParamField>
+
+## Link Journal Entries
+
+### Link From Journal Entry
+
+Link a journal entry to the 'from' (seller/lender) side.
+
+```bash POST /api/v1/intercompany-transactions/{id}/link-from-journal-entry
+curl -X POST "https://your-instance.accountability.app/api/v1/intercompany-transactions/{transactionId}/link-from-journal-entry" \
+  -H "Authorization: Bearer your-session-token" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "journalEntryId": "je_seller_001"
+  }'
+```
+
+<ParamField body="journalEntryId" type="string" required>
+  Journal entry UUID from the from company
+</ParamField>
+
+### Link To Journal Entry
+
+Link a journal entry to the 'to' (buyer/borrower) side.
+
+```bash POST /api/v1/intercompany-transactions/{id}/link-to-journal-entry
+curl -X POST "https://your-instance.accountability.app/api/v1/intercompany-transactions/{transactionId}/link-to-journal-entry" \
+  -H "Authorization: Bearer your-session-token" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "journalEntryId": "je_buyer_001"
+  }'
+```
+
+<ParamField body="journalEntryId" type="string" required>
+  Journal entry UUID from the to company
+</ParamField>
+
+## Reconciliation Workflow
+
+<Steps>
+  <Step title="Identify Unmatched Transactions">
+    Query for unmatched transactions:
+    ```bash
+    GET /api/v1/intercompany-transactions?unmatched=true
+    ```
+  </Step>
+  
+  <Step title="Link Journal Entries">
+    Link the corresponding journal entries from both companies:
+    ```bash
+    POST /api/v1/intercompany-transactions/{id}/link-from-journal-entry
+    POST /api/v1/intercompany-transactions/{id}/link-to-journal-entry
+    ```
+  </Step>
+  
+  <Step title="Update Matching Status">
+    If amounts match perfectly, mark as Matched:
+    ```bash
+    POST /api/v1/intercompany-transactions/{id}/matching-status
+    { "matchingStatus": "Matched" }
+    ```
+    
+    If variances exist, document them:
+    ```bash
+    POST /api/v1/intercompany-transactions/{id}/matching-status
+    {
+      "matchingStatus": "PartiallyMatched",
+      "varianceExplanation": "Timing difference"
+    }
+    ```
+  </Step>
+  
+  <Step title="Approve Variances">
+    For documented variances, approve after review:
+    ```bash
+    POST /api/v1/intercompany-transactions/{id}/matching-status
+    { "matchingStatus": "VarianceApproved" }
+    ```
+  </Step>
+</Steps>
+
+## Error Responses
+
+<AccordionGroup>
+  <Accordion title="Transaction Not Found (404)">
+    ```json
+    {
+      "_tag": "IntercompanyTransactionNotFoundError",
+      "intercompanyTransactionId": "ict_123e4567-e89b-12d3-a456-426614174000",
+      "message": "Intercompany transaction not found"
+    }
+    ```
+  </Accordion>
+  
+  <Accordion title="Cannot Be Deleted (409)">
+    ```json
+    {
+      "_tag": "IntercompanyTransactionCannotBeDeletedError",
+      "intercompanyTransactionId": "ict_123e4567-e89b-12d3-a456-426614174000",
+      "reason": "Transaction has been eliminated in consolidation run",
+      "message": "Cannot delete transaction that has been eliminated in consolidation"
+    }
+    ```
+  </Accordion>
+  
+  <Accordion title="Same Company Error (400)">
+    ```json
+    {
+      "_tag": "SameCompanyIntercompanyError",
+      "companyId": "comp_123e4567-e89b-12d3-a456-426614174000",
+      "message": "Intercompany transactions must be between different companies"
+    }
+    ```
+  </Accordion>
+</AccordionGroup>

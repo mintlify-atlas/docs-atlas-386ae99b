@@ -1,0 +1,478 @@
+---
+title: 'Intercompany Transactions'
+description: 'Track, match, and reconcile transactions between related companies'
+---
+
+# Intercompany Transactions
+
+Intercompany transactions are business transactions between companies within the same consolidation group. These transactions must be tracked, reconciled, and eliminated during consolidation to prevent overstating the group's financial position.
+
+## What Are Intercompany Transactions?
+
+Intercompany transactions occur when related companies do business with each other:
+
+- **Sales and purchases** - One company sells goods/services to another
+- **Loans** - One company lends money to another
+- **Management fees** - Charges for shared services or management
+- **Dividends** - Subsidiary pays dividends to parent
+- **Capital contributions** - Parent invests capital in subsidiary
+- **Cost allocations** - Shared costs allocated across entities
+- **Royalties** - Payments for intellectual property use
+
+Each transaction appears on **both** companies' books, which means it must be eliminated during consolidation.
+
+## Transaction Lifecycle
+
+<Steps>
+
+### Transaction occurs
+
+Two group companies engage in a business transaction.
+
+**Example**: Company A sells $10,000 of goods to Company B.
+
+### Both sides record entries
+
+**Company A** (Seller):
+```
+DR  Accounts Receivable - IC    $10,000
+  CR  Sales Revenue - IC                $10,000
+```
+
+**Company B** (Buyer):
+```
+DR  Inventory / COGS           $10,000
+  CR  Accounts Payable - IC             $10,000
+```
+
+### Transaction is tracked
+
+The system creates an `IntercompanyTransaction` record linking both journal entries.
+
+### Matching and reconciliation
+
+The system identifies whether both sides agree on the amount and details.
+
+### Elimination during consolidation
+
+When consolidating, elimination rules remove both sides of the transaction.
+
+</Steps>
+
+## Transaction Types
+
+The system tracks seven types of intercompany transactions:
+
+### Sale/Purchase
+
+**Description**: Sale or purchase of goods or services between group companies.
+
+**Typical Accounts**:
+- Seller: Intercompany Revenue, Intercompany Receivable
+- Buyer: Inventory/COGS, Intercompany Payable
+
+**Elimination**: Remove revenue and corresponding expense/asset.
+
+### Loan
+
+**Description**: Intercompany loans including principal and interest.
+
+**Typical Accounts**:
+- Lender: Intercompany Loan Receivable, Interest Income
+- Borrower: Intercompany Loan Payable, Interest Expense
+
+**Elimination**: Remove loan receivable/payable and interest income/expense.
+
+### Management Fee
+
+**Description**: Charges for management services, shared services, or administrative support.
+
+**Typical Accounts**:
+- Service Provider: Management Fee Revenue
+- Service Recipient: Management Fee Expense
+
+**Elimination**: Remove management fee income and expense.
+
+### Dividend
+
+**Description**: Dividend distributions from subsidiary to parent.
+
+**Typical Accounts**:
+- Subsidiary: Dividends Paid (equity)
+- Parent: Dividend Income
+
+**Elimination**: Remove dividend income and reduce equity.
+
+<Info>
+Dividend eliminations affect the equity section of the consolidated balance sheet and may impact retained earnings calculations.
+</Info>
+
+### Capital Contribution
+
+**Description**: Capital invested by parent in subsidiary.
+
+**Typical Accounts**:
+- Parent: Investment in Subsidiary
+- Subsidiary: Paid-in Capital
+
+**Elimination**: Part of investment elimination in consolidation.
+
+### Cost Allocation
+
+**Description**: Allocation of shared costs (rent, IT, HR) across entities.
+
+**Typical Accounts**:
+- Allocating Company: Cost Allocation Expense (recovery)
+- Receiving Company: Allocated Cost Expense
+
+**Elimination**: Remove allocated expense and corresponding recovery.
+
+### Royalty
+
+**Description**: Payments for use of intellectual property (trademarks, patents, technology).
+
+**Typical Accounts**:
+- IP Owner: Royalty Income
+- IP User: Royalty Expense
+
+**Elimination**: Remove royalty income and expense.
+
+## Matching Statuses
+
+The system tracks the reconciliation status of each intercompany transaction:
+
+### Matched
+
+**Status**: Both sides agree - entries on both companies match exactly.
+
+**Indicators**:
+- ✓ Both journal entry IDs are present
+- ✓ Amounts match exactly
+- ✓ Transaction dates align
+
+**Action**: Ready for automatic elimination.
+
+### Unmatched
+
+**Status**: Missing entry on one side - only one company has recorded the transaction.
+
+**Indicators**:
+- ✗ Only one journal entry ID present
+- ⚠️ Other side hasn't recorded transaction yet
+
+**Action**: Follow up with the other company to record their side.
+
+### Partially Matched
+
+**Status**: Amounts differ - both sides have entries but amounts don't match.
+
+**Indicators**:
+- ✓ Both journal entry IDs present
+- ✗ Amounts don't match
+- ⚠️ Variance amount calculated
+
+**Action**: Investigate and resolve the discrepancy.
+
+### Variance Approved
+
+**Status**: Difference accepted - variance has been reviewed and approved.
+
+**Indicators**:
+- ✓ Both journal entry IDs present
+- ⚠️ Known variance with explanation
+- ✓ Approved for elimination
+
+**Action**: Eliminate using the agreed-upon amount.
+
+<Note>
+Variances may be legitimate (timing differences, FX translation, rounding) or may indicate errors requiring correction. Always document the reason for approving a variance.
+</Note>
+
+## Creating Intercompany Transactions
+
+There are two ways to create intercompany transaction records:
+
+### Automatic Creation (Recommended)
+
+When recording journal entries, flag intercompany transactions:
+
+1. Create journal entry as usual
+2. Enable **Intercompany transaction** flag
+3. Select **Partner company** (the related party)
+4. Choose **Transaction type** (Sale/Purchase, Loan, etc.)
+5. System automatically creates intercompany transaction record
+
+### Manual Creation
+
+For historical or imported transactions:
+
+1. Navigate to **Consolidation** > **Intercompany Transactions**
+2. Click **Create Transaction**
+3. Fill in:
+   - From company (seller/lender)
+   - To company (buyer/borrower)
+   - Transaction type
+   - Date and amount
+   - Link to journal entries (if available)
+
+## Reconciling Intercompany Transactions
+
+Regular reconciliation ensures accurate consolidation:
+
+<Steps>
+
+### Generate intercompany reconciliation report
+
+Navigate to **Consolidation** > **Intercompany Reconciliation**. Filter by:
+- Date range
+- Company pair
+- Transaction type
+- Matching status
+
+### Review unmatched transactions
+
+Identify transactions where only one side has recorded an entry:
+
+**Common causes**:
+- Timing difference (one side recorded in different period)
+- Missing entry (transaction not yet recorded)
+- Incorrect classification (not flagged as intercompany)
+
+### Investigate variances
+
+For partially matched transactions, identify the source of discrepancies:
+
+**Common causes**:
+- Currency translation differences
+- Rounding differences
+- Incorrect amounts entered
+- Different transaction dates
+
+### Resolve discrepancies
+
+Take corrective action:
+
+- **Missing entries**: Record the missing side
+- **Incorrect amounts**: Post correcting journal entries
+- **Timing differences**: Wait for next period or reclassify
+- **Legitimate variances**: Document and approve
+
+### Approve variances if legitimate
+
+For approved variances:
+1. Select the transaction
+2. Click **Approve Variance**
+3. Enter explanation
+4. Save
+
+</Steps>
+
+## Intercompany Transaction Properties
+
+Each intercompany transaction contains:
+
+```typescript
+interface IntercompanyTransaction {
+  id: string
+  
+  // Companies involved
+  fromCompanyId: string  // Seller/lender
+  toCompanyId: string    // Buyer/borrower
+  
+  // Transaction details
+  transactionType: "SalePurchase" | "Loan" | "ManagementFee" | "Dividend" | "CapitalContribution" | "CostAllocation" | "Royalty"
+  transactionDate: string
+  amount: MonetaryAmount
+  
+  // Journal entry links
+  fromJournalEntryId?: string  // Entry on seller/lender side
+  toJournalEntryId?: string    // Entry on buyer/borrower side
+  
+  // Matching status
+  matchingStatus: "Matched" | "Unmatched" | "PartiallyMatched" | "VarianceApproved"
+  
+  // Variance tracking
+  varianceAmount?: MonetaryAmount
+  varianceExplanation?: string
+  
+  // Optional description
+  description?: string
+}
+```
+
+## Intercompany Accounts Setup
+
+For effective intercompany tracking, set up dedicated accounts:
+
+### Recommended Account Structure
+
+Designate account range **9000-9999** for all intercompany accounts:
+
+**Balance Sheet Accounts**:
+- 9010-9099: Intercompany Receivables
+- 9100-9199: Intercompany Payables
+- 9200-9299: Intercompany Loans (Receivable)
+- 9300-9399: Intercompany Loans (Payable)
+
+**Income Statement Accounts**:
+- 9400-9499: Intercompany Revenue
+- 9500-9599: Intercompany COGS/Expenses
+- 9600-9699: Intercompany Interest Income
+- 9700-9799: Intercompany Interest Expense
+
+**Equity Accounts**:
+- 9800-9899: Intercompany Dividends
+- 9900-9999: Investment in Subsidiaries
+
+<Info>
+Consistent account numbering across all group companies simplifies reconciliation and makes it easier to configure elimination rules.
+</Info>
+
+## Viewing Intercompany Transaction Reports
+
+The system provides several reports for managing intercompany transactions:
+
+### Intercompany Transaction Listing
+
+View all transactions with filtering options:
+- By company pair
+- By transaction type
+- By matching status
+- By date range
+
+### Intercompany Reconciliation Report
+
+Side-by-side comparison of both sides of each transaction:
+- From company amount
+- To company amount
+- Variance
+- Matching status
+
+### Unresolved Variances Report
+
+Highlights transactions requiring attention:
+- Unmatched transactions
+- Partially matched with variances
+- Aging of unresolved items
+
+## Consolidation Impact
+
+During consolidation runs, the system:
+
+1. **Matches intercompany transactions** - Identifies corresponding entries on both sides
+2. **Calculates variances** - Determines if amounts match
+3. **Applies elimination rules** - Removes matched or approved transactions
+4. **Reports exceptions** - Flags unmatched or unapproved variances
+
+<Warning>
+Unmatched or unapproved intercompany transactions may prevent successful consolidation or result in warnings. Resolve all discrepancies before finalizing consolidated reports.
+</Warning>
+
+## Best Practices
+
+<AccordionGroup>
+
+<Accordion title="Use standardized intercompany accounts">
+All group companies should use the same account numbers for intercompany transactions. This simplifies reconciliation and elimination rule configuration.
+</Accordion>
+
+<Accordion title="Reconcile monthly">
+Don't wait until consolidation time to reconcile intercompany transactions. Monthly reconciliation identifies discrepancies when they're easier to resolve.
+</Accordion>
+
+<Accordion title="Document all variances">
+Every approved variance should have a clear explanation. This creates an audit trail and helps others understand the reasoning.
+</Accordion>
+
+<Accordion title="Establish cut-off procedures">
+Define clear cut-off dates for recording intercompany transactions to minimize timing differences between companies.
+</Accordion>
+
+<Accordion title="Use intercompany flags consistently">
+Train all users to consistently flag intercompany transactions when creating journal entries. This ensures complete tracking.
+</Accordion>
+
+<Accordion title="Communicate across entities">
+Establish regular communication between accounting teams at different entities to quickly resolve discrepancies.
+</Accordion>
+
+</AccordionGroup>
+
+## Common Scenarios
+
+### Scenario 1: Intercompany Sale
+
+**Transaction**: Company A sells $25,000 of inventory to Company B.
+
+**Company A books**:
+```
+DR  IC Receivable - Co B       $25,000
+  CR  IC Sales Revenue                  $25,000
+```
+
+**Company B books**:
+```
+DR  Inventory                  $25,000
+  CR  IC Payable - Co A                 $25,000
+```
+
+**System action**: Creates intercompany transaction, matches both entries, status = Matched.
+
+**Consolidation**: Elimination rule removes IC Revenue and adjusts Inventory.
+
+### Scenario 2: Intercompany Loan
+
+**Transaction**: Parent lends $100,000 to Subsidiary at 5% interest.
+
+**Parent books**:
+```
+DR  IC Loan Receivable         $100,000
+  CR  Cash                              $100,000
+```
+
+**Subsidiary books**:
+```
+DR  Cash                       $100,000
+  CR  IC Loan Payable                   $100,000
+```
+
+**Monthly interest**:
+- Parent: DR Interest Receivable / CR Interest Income
+- Subsidiary: DR Interest Expense / CR Interest Payable
+
+**Consolidation**: Eliminates loan receivable/payable and interest income/expense.
+
+### Scenario 3: Dividend Payment
+
+**Transaction**: Subsidiary declares $50,000 dividend to 100% owner Parent.
+
+**Subsidiary books**:
+```
+DR  Retained Earnings          $50,000
+  CR  Dividends Payable - Parent        $50,000
+
+DR  Dividends Payable - Parent $50,000
+  CR  Cash                              $50,000
+```
+
+**Parent books**:
+```
+DR  Cash                       $50,000
+  CR  Dividend Income                   $50,000
+```
+
+**Consolidation**: Eliminates dividend income; retained earnings reduction remains.
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Elimination Rules" icon="rectangle-xmark" href="/advanced/elimination-rules">
+    Configure automatic elimination rules
+  </Card>
+  <Card title="Consolidation" icon="layer-group" href="/advanced/consolidation">
+    Run the full consolidation process
+  </Card>
+  <Card title="Journal Entries" icon="book" href="/features/journal-entries">
+    Create and manage journal entries
+  </Card>
+</CardGroup>

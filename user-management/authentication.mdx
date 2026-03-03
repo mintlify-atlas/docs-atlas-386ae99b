@@ -1,0 +1,580 @@
+---
+title: Authentication
+description: User authentication, login flows, and session management in Accountability
+---
+
+# Authentication
+
+Accountability uses a **multi-provider authentication system** that allows users to authenticate via multiple methods while maintaining a unified identity.
+
+## Supported Providers
+
+The system supports five authentication provider types:
+
+| Provider | Type | Use Case | Auto-Registration |
+|----------|------|----------|-------------------|
+| **local** | Email/password | Self-service apps | Supported |
+| **google** | OAuth 2.0 | Consumer apps | Automatic |
+| **github** | OAuth 2.0 | Developer apps | Automatic |
+| **workos** | SSO | Enterprise apps | Automatic |
+| **saml** | SAML 2.0 | Enterprise apps | Automatic |
+
+<Note>
+  Users can link multiple authentication providers to a single account, allowing flexible login options.
+</Note>
+
+## Authentication Flows
+
+<Accordion title="Local Authentication (Email/Password)">
+
+### Registration
+
+Users register with email and password:
+
+<Steps>
+  <Step title="Submit credentials">
+    User provides email, password, and display name
+  </Step>
+  
+  <Step title="Validate password">
+    System validates password against security requirements:
+    - Minimum 8 characters (configurable)
+    - Optional uppercase, numbers, special characters
+  </Step>
+  
+  <Step title="Hash password">
+    Password hashed using argon2id with automatic salt generation
+  </Step>
+  
+  <Step title="Create user">
+    User account and local identity created
+  </Step>
+</Steps>
+
+### Login
+
+Users authenticate with email and password:
+
+<Steps>
+  <Step title="Submit credentials">
+    User provides email and password
+  </Step>
+  
+  <Step title="Verify credentials">
+    System verifies email exists and password hash matches
+  </Step>
+  
+  <Step title="Create session">
+    Session created with secure random token (7-day default duration)
+  </Step>
+  
+  <Step title="Return token">
+    Session token returned as httpOnly secure cookie
+  </Step>
+</Steps>
+
+**Password Storage Security:**
+- Passwords hashed using argon2id
+- Salt automatically generated per password
+- Original password never stored or logged
+- Generic error messages ("Invalid email or password") to prevent user enumeration
+
+</Accordion>
+
+<Accordion title="OAuth Authentication (Google, GitHub)">
+
+### Authorization Flow
+
+<Steps>
+  <Step title="Request authorization URL">
+    Client calls `/api/auth/authorize/:provider` to get OAuth URL with CSRF state token
+  </Step>
+  
+  <Step title="Redirect to provider">
+    User redirects to provider (Google/GitHub) for authentication
+  </Step>
+  
+  <Step title="Provider authenticates">
+    Provider authenticates user and grants authorization
+  </Step>
+  
+  <Step title="Callback with code">
+    Provider redirects back with authorization code and state
+  </Step>
+  
+  <Step title="Exchange code">
+    `/api/auth/callback/:provider` validates state and exchanges code for tokens
+  </Step>
+  
+  <Step title="Fetch profile">
+    System fetches user profile from provider
+  </Step>
+  
+  <Step title="Create/link user">
+    If user exists with same email, link identity. Otherwise, create new user.
+  </Step>
+  
+  <Step title="Create session">
+    Session created (24-hour default duration for OAuth)
+  </Step>
+</Steps>
+
+**OAuth Scopes Requested:**
+- `openid` - OpenID Connect
+- `email` - User's email address
+- `profile` - User's profile info (name, picture)
+
+**User Data Retrieved:**
+- Provider user ID
+- Email address (verified)
+- Display name
+- Profile picture URL (optional)
+
+</Accordion>
+
+<Accordion title="SSO Authentication (WorkOS, SAML)">
+
+### Enterprise SSO Flow
+
+<Steps>
+  <Step title="Request authorization URL">
+    Client calls `/api/auth/authorize/workos` to get SSO URL
+  </Step>
+  
+  <Step title="Redirect to IdP">
+    User redirects to their company's identity provider (Okta, Azure AD, etc.)
+  </Step>
+  
+  <Step title="IdP authenticates">
+    Enterprise IdP authenticates user via corporate credentials
+  </Step>
+  
+  <Step title="WorkOS validates">
+    WorkOS/IdP redirects back with authorization code
+  </Step>
+  
+  <Step title="Exchange for profile">
+    System exchanges code for user profile and organization info
+  </Step>
+  
+  <Step title="Create/link user">
+    User account created or linked based on email
+  </Step>
+  
+  <Step title="Create session">
+    Session created (8-hour default duration for enterprise SSO)
+  </Step>
+</Steps>
+
+**WorkOS Connection Types:**
+- SAML (Okta, Azure AD, OneLogin)
+- OIDC (OpenID Connect)
+- Google Workspace
+- Microsoft Azure AD
+
+**User Data Retrieved:**
+- WorkOS profile ID
+- Email address
+- First/last name
+- Connection ID and type
+- Organization ID
+- Custom IdP attributes
+
+</Accordion>
+
+## Session Management
+
+### Session Properties
+
+Each session contains:
+
+| Property | Description |
+|----------|-------------|
+| **id** | Secure random token (session ID) |
+| **userId** | Reference to authenticated user |
+| **provider** | Auth provider used for this session |
+| **expiresAt** | Session expiration timestamp |
+| **userAgent** | Browser/client user agent (audit) |
+| **createdAt** | Session creation timestamp |
+
+### Session Duration
+
+Default session durations by provider:
+
+| Provider | Duration | Rationale |
+|----------|----------|----------|
+| **local** | 7 days | Users expect to stay logged in |
+| **google** | 24 hours | Consumer OAuth standard |
+| **github** | 24 hours | Consumer OAuth standard |
+| **workos** | 8 hours | Enterprise workday session |
+| **saml** | 8 hours | Enterprise workday session |
+
+<Note>
+  Sessions are configurable via `AUTH_SESSION_DURATION` environment variable.
+</Note>
+
+### Session Security
+
+**Token Storage:**
+
+<Warning>
+  Session tokens MUST be stored in httpOnly secure cookies. localStorage usage is FORBIDDEN.
+</Warning>
+
+The session token is set as an httpOnly cookie:
+
+```typescript
+HttpServerResponse.setCookie("session", token, {
+  httpOnly: true,      // Not accessible via JavaScript - prevents XSS theft
+  secure: true,        // Only sent over HTTPS
+  sameSite: "strict",  // CSRF protection
+  path: "/",           // Available for all routes
+  maxAge: "7 days"     // Session duration
+})
+```
+
+**Why httpOnly cookies are required:**
+- **XSS Protection**: httpOnly cookies cannot be accessed by JavaScript, preventing token theft even if XSS attacks occur
+- **Automatic transmission**: Browser automatically sends cookies with requests
+- **CSRF protection**: Combined with `sameSite: "strict"`, cookies are not sent with cross-site requests
+
+**Why localStorage is forbidden:**
+- **XSS vulnerability**: Any XSS attack can read localStorage and exfiltrate tokens
+- **No expiration control**: localStorage has no built-in expiration
+- **Cross-tab leakage**: Malicious scripts in any tab can access localStorage
+- **Persistence risk**: localStorage survives browser restarts
+
+**CSRF Protection:**
+
+All OAuth flows use a `state` parameter for CSRF protection:
+
+1. Server generates cryptographically random state (32 bytes)
+2. State included in authorization URL
+3. State returned in callback
+4. Server validates state matches before processing
+
+**Session Validation:**
+
+```typescript
+interface ValidatedSession {
+  user: AuthUser
+  session: Session
+}
+
+// Check if session exists and hasn't expired
+session.isValid(now: Timestamp): boolean
+session.isExpired(now: Timestamp): boolean
+```
+
+## Identity Linking
+
+Users can link multiple authentication providers to a single account:
+
+### Automatic Linking
+
+When `AUTH_AUTO_LINK_BY_EMAIL=true` (default), authenticating with a new provider automatically links to an existing user with the same verified email.
+
+<Note>
+  Email must be verified by the provider for automatic linking to occur.
+</Note>
+
+### Manual Linking
+
+Users can explicitly link additional providers:
+
+<Steps>
+  <Step title="Start with active session">
+    User must be logged in with an existing provider
+  </Step>
+  
+  <Step title="Initiate linking">
+    Call `/api/auth/link/:provider` to get authorization URL
+  </Step>
+  
+  <Step title="Authenticate with provider">
+    Complete OAuth/SAML flow with the new provider
+  </Step>
+  
+  <Step title="Link identity">
+    System creates UserIdentity record linking providers
+  </Step>
+</Steps>
+
+### Unlinking
+
+Users can remove linked identities:
+
+```http
+DELETE /api/auth/identities/:identityId
+```
+
+<Warning>
+  Users must keep at least one authentication method. The last identity cannot be unlinked.
+</Warning>
+
+## Domain Models
+
+### AuthUser
+
+The main user entity for authentication:
+
+```typescript
+class AuthUser {
+  id: AuthUserId                // Unique identifier
+  email: Email                  // User's email address
+  displayName: string           // Display name
+  role: UserRole                // Platform role (admin/owner/member/viewer)
+  primaryProvider: AuthProviderType  // Provider used for registration
+  createdAt: Timestamp
+  updatedAt: Timestamp
+}
+```
+
+Location: `packages/core/src/authentication/AuthUser.ts`
+
+### Session
+
+Authenticated user session:
+
+```typescript
+class Session {
+  id: SessionId                 // Secure random token
+  userId: AuthUserId            // Reference to user
+  provider: AuthProviderType    // Provider for this session
+  expiresAt: Timestamp          // Expiration time
+  createdAt: Timestamp
+  userAgent: Option<string>     // Client user agent
+  
+  // Methods
+  isExpired(now: Timestamp): boolean
+  isValid(now: Timestamp): boolean
+  timeRemainingMs(now: Timestamp): number
+}
+```
+
+Location: `packages/core/src/authentication/Session.ts`
+
+### UserIdentity
+
+Links users to authentication providers:
+
+```typescript
+class UserIdentity {
+  id: UUID                      // Identity record ID
+  userId: AuthUserId            // User this identity belongs to
+  provider: AuthProviderType    // Provider type
+  providerId: ProviderId        // ID from provider
+  passwordHash?: string         // Hash (local provider only)
+  providerData?: JSON           // Provider-specific data
+  createdAt: Timestamp
+}
+```
+
+Location: `packages/core/src/authentication/UserIdentity.ts`
+
+## API Endpoints
+
+### Public Endpoints
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/auth/providers` | List enabled providers |
+| POST | `/api/auth/register` | Register with local provider |
+| POST | `/api/auth/login` | Login with any provider |
+| GET | `/api/auth/authorize/:provider` | Get OAuth authorization URL |
+| GET | `/api/auth/callback/:provider` | Handle OAuth callback |
+
+### Protected Endpoints
+
+| Method | Path | Description |
+|--------|------|-------------|
+| POST | `/api/auth/logout` | Invalidate current session |
+| GET | `/api/auth/me` | Get current user with identities |
+| POST | `/api/auth/refresh` | Refresh session token |
+| POST | `/api/auth/link/:provider` | Initiate provider linking |
+| GET | `/api/auth/link/callback/:provider` | Complete provider linking |
+| DELETE | `/api/auth/identities/:identityId` | Unlink provider identity |
+
+## Configuration
+
+### Environment Variables
+
+**Global Settings:**
+
+```bash
+AUTH_ENABLED_PROVIDERS=local,google,workos  # Comma-separated list
+AUTH_DEFAULT_ROLE=member                     # Default role for new users
+AUTH_SESSION_DURATION=24 hours               # Default session duration
+AUTH_AUTO_LINK_BY_EMAIL=true                 # Auto-link by email
+AUTH_REQUIRE_EMAIL_VERIFICATION=false        # Require email verification
+```
+
+**Local Provider:**
+
+```bash
+AUTH_LOCAL_MIN_PASSWORD_LENGTH=12
+AUTH_LOCAL_REQUIRE_UPPERCASE=true
+AUTH_LOCAL_REQUIRE_NUMBERS=true
+AUTH_LOCAL_REQUIRE_SPECIAL_CHARS=true
+```
+
+**Google OAuth:**
+
+```bash
+AUTH_GOOGLE_CLIENT_ID=123456789-abcdef.apps.googleusercontent.com
+AUTH_GOOGLE_CLIENT_SECRET=GOCSPX-abc123
+AUTH_GOOGLE_REDIRECT_URI=https://app.example.com/api/auth/callback/google
+```
+
+**WorkOS SSO:**
+
+```bash
+AUTH_WORKOS_API_KEY=sk_live_xxxxxxxxxxxx
+AUTH_WORKOS_CLIENT_ID=client_xxxxxxxxxxxx
+AUTH_WORKOS_REDIRECT_URI=https://app.example.com/api/auth/callback/workos
+AUTH_WORKOS_ORGANIZATION_ID=org_xxxxxxxxxxxx  # Optional
+```
+
+## Error Handling
+
+### Common Errors
+
+| Error | HTTP Status | Cause | Resolution |
+|-------|-------------|-------|------------|
+| `InvalidCredentialsError` | 401 | Wrong email/password | Check credentials |
+| `SessionExpiredError` | 401 | Session expired | Re-authenticate |
+| `SessionNotFoundError` | 401 | Invalid session token | Re-authenticate |
+| `ProviderAuthFailedError` | 401 | OAuth/SSO failed | Check provider config |
+| `ProviderNotEnabledError` | 404 | Provider not configured | Enable provider |
+| `UserNotFoundError` | 404 | User doesn't exist | Register first |
+| `UserAlreadyExistsError` | 409 | Email taken | Use different email |
+| `IdentityAlreadyLinkedError` | 409 | Identity linked to other user | Unlink from other account |
+| `PasswordTooWeakError` | 400 | Password requirements not met | Use stronger password |
+| `OAuthStateError` | 400 | CSRF state mismatch | Restart OAuth flow |
+
+### Error Messages
+
+Authentication errors use generic messages to prevent user enumeration:
+
+```typescript
+// ✅ Good - generic message
+"Invalid email or password"
+
+// ❌ Bad - reveals whether email exists
+"User not found"
+"Incorrect password"
+```
+
+## Security Best Practices
+
+<Accordion title="Password Security">
+
+**Storage:**
+- Use argon2id for password hashing
+- Automatic salt generation per password
+- Never store or log original passwords
+
+**Requirements:**
+- Minimum 12 characters recommended for production
+- Require uppercase, numbers, special characters
+- Server-side validation only
+
+**Error Messages:**
+- Use generic messages for login failures
+- Don't reveal whether email exists
+
+</Accordion>
+
+<Accordion title="Session Security">
+
+**Token Storage:**
+- MUST use httpOnly secure cookies
+- NEVER use localStorage or sessionStorage
+- Set `sameSite: "strict"` for CSRF protection
+
+**Token Generation:**
+- Use cryptographically secure random bytes
+- Minimum 32 bytes (256 bits)
+- Base64url encode for transmission
+
+**Expiration:**
+- Set reasonable durations by provider type
+- Automatic cleanup of expired sessions
+- Manual logout invalidates immediately
+
+</Accordion>
+
+<Accordion title="OAuth/SAML Security">
+
+**CSRF Protection:**
+- Always use state parameter
+- Generate cryptographically random state
+- Validate state on callback
+
+**Token Exchange:**
+- Exchange authorization code server-side only
+- Never expose client secrets to frontend
+- Validate all tokens before use
+
+**Email Verification:**
+- Only auto-link verified email addresses
+- Check provider's verification status
+- Require manual linking for unverified emails
+
+</Accordion>
+
+## Troubleshooting
+
+<Accordion title="Login Issues">
+
+**"Invalid credentials" for local auth:**
+1. Check user exists in `auth_users` table
+2. Check identity exists in `auth_identities` with `provider='local'`
+3. Verify password hash is set
+
+**OAuth callback errors:**
+1. Verify redirect URI matches exactly
+2. Check authorization code hasn't been used
+3. Ensure state parameter matches
+
+**"Provider not enabled" error:**
+1. Add provider to `AUTH_ENABLED_PROVIDERS`
+2. Configure provider credentials
+3. Restart application
+
+</Accordion>
+
+<Accordion title="Session Issues">
+
+**"Session not found":**
+- Session was logged out or expired
+- Re-authenticate to create new session
+
+**"Session expired":**
+- Session duration exceeded
+- Configure longer duration or implement refresh
+
+**Session not persisting:**
+- Check httpOnly cookie is being set
+- Verify HTTPS in production
+- Check `sameSite` cookie attribute
+
+</Accordion>
+
+<Accordion title="Identity Linking Issues">
+
+**"Identity already linked" error:**
+- Identity is linked to a different user
+- Unlink from other account first
+- Consider if accounts should be merged
+
+**Auto-linking not working:**
+1. Verify `AUTH_AUTO_LINK_BY_EMAIL=true`
+2. Check email is verified by provider
+3. Confirm email addresses match exactly
+
+**Cannot unlink last identity:**
+- Users must keep at least one authentication method
+- Add another provider before unlinking
+
+</Accordion>

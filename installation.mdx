@@ -1,0 +1,653 @@
+---
+title: Installation
+description: Set up the Accountability development environment locally
+---
+
+# Installation Guide
+
+This guide will help you set up Accountability for local development.
+
+## Prerequisites
+
+Before you begin, ensure you have the following installed:
+
+- **Node.js**: v20 or higher
+- **pnpm**: v10.17.1 or higher (package manager)
+- **Docker**: Latest version (for testcontainers during testing)
+- **Git**: For cloning the repository
+
+<Warning>
+  **DO NOT** manually run Docker containers or docker-compose. The database is managed automatically by testcontainers during testing, and in production, it's managed externally.
+</Warning>
+
+## Quick Start
+
+<Steps>
+  <Step title="Clone the Repository">
+    ```bash
+    git clone https://github.com/your-org/accountability.git
+    cd accountability
+    ```
+  </Step>
+
+  <Step title="Install Dependencies">
+    Use pnpm to install all dependencies:
+
+    ```bash
+    pnpm install
+    ```
+
+    This installs dependencies for all packages in the monorepo:
+    - `packages/core` - Core accounting logic (Effect)
+    - `packages/persistence` - Database layer (@effect/sql + PostgreSQL)
+    - `packages/api` - Effect HttpApi server
+    - `packages/web` - React UI (TanStack Start)
+
+    <Note>
+      The project uses pnpm workspaces. The root `package.json` specifies the exact package manager version: `pnpm@10.17.1`
+    </Note>
+  </Step>
+
+  <Step title="Start Development Server">
+    Run the development server:
+
+    ```bash
+    pnpm dev
+    ```
+
+    This starts:
+    - TanStack Start development server on `http://localhost:3000`
+    - Hot module reloading (HMR) for frontend and API
+    - Automatic route generation
+
+    <Note>
+      The dev server runs the full-stack application. No separate backend server is needed.
+    </Note>
+  </Step>
+
+  <Step title="Open in Browser">
+    Navigate to `http://localhost:3000`
+
+    You'll see the Accountability landing page. Click **Register** to create your first account.
+  </Step>
+</Steps>
+
+## Project Structure
+
+Understand the monorepo layout:
+
+```
+accountability/
+├── packages/
+│   ├── core/           # Core accounting logic (Effect, 100% tested)
+│   │   ├── src/
+│   │   │   ├── accounting/    # Chart of accounts, account entities
+│   │   │   ├── journal/       # Journal entry services
+│   │   │   ├── fiscal/        # Fiscal period management
+│   │   │   ├── consolidation/ # Consolidation engine
+│   │   │   ├── authentication/# Auth service interfaces
+│   │   │   └── authorization/ # RBAC policy engine
+│   │   └── test/             # Core unit tests
+│   │
+│   ├── persistence/    # Database layer (@effect/sql + PostgreSQL)
+│   │   ├── src/
+│   │   │   ├── Migrations/    # Database migrations
+│   │   │   ├── Services/      # Repository implementations
+│   │   │   └── Layers/        # Effect layers
+│   │   └── test/             # Integration tests
+│   │
+│   ├── api/            # Effect HttpApi server + OpenAPI export
+│   │   ├── src/
+│   │   │   ├── endpoints/     # HTTP endpoints
+│   │   │   ├── schemas/       # Request/response schemas
+│   │   │   └── middleware/    # Auth, CORS, error handling
+│   │   └── test/             # API integration tests
+│   │
+│   └── web/            # React UI (NO Effect - openapi-fetch client)
+│       ├── src/
+│       │   ├── routes/        # TanStack file-based routing
+│       │   ├── components/    # React components
+│       │   ├── api/           # API client setup
+│       │   └── utils/         # Helper functions
+│       └── test/             # Frontend tests
+│           └── e2e/           # Playwright E2E tests
+│
+├── specs/              # All specifications and documentation
+│   ├── guides/         # How-to guides (Effect, Frontend, Testing, API)
+│   ├── architecture/   # System architecture docs
+│   ├── pending/        # Features not yet implemented
+│   └── completed/      # Historical reference
+│
+├── repos/              # Reference repositories (git subtrees)
+│   ├── effect/         # Effect-TS source for reference
+│   └── tanstack-router/# TanStack Router/Start source
+│
+├── package.json        # Root workspace configuration
+├── pnpm-workspace.yaml # Workspace definitions
+├── tsconfig.json       # TypeScript configuration
+├── vitest.config.ts    # Vitest configuration
+└── CLAUDE.md           # Claude Code guide
+```
+
+## Database Setup
+
+Accountability uses PostgreSQL with automatic schema migration.
+
+### Automated Testing Database
+
+For **unit and integration tests**, the database is managed automatically:
+
+<Steps>
+  <Step title="Testcontainers">
+    The test suite uses [testcontainers](https://testcontainers.com/) to automatically:
+    
+    1. Start a PostgreSQL container before tests
+    2. Run migrations to create schema
+    3. Execute tests
+    4. Tear down container after tests
+
+    **No manual setup required!**
+
+    <CodeGroup>
+    ```typescript vitest.global-setup.ts
+    import { PostgreSqlContainer } from "@testcontainers/postgresql"
+
+    let container: StartedPostgreSqlContainer
+
+    export async function setup(project: GlobalSetupContext) {
+      console.log("Starting shared PostgreSQL container...")
+      
+      container = await new PostgreSqlContainer("postgres:alpine").start()
+      
+      const dbUrl = container.getConnectionUri()
+      project.provide("dbUrl", dbUrl)
+      
+      console.log(`PostgreSQL ready at ${dbUrl}`)
+    }
+    ```
+    </CodeGroup>
+  </Step>
+
+  <Step title="Run Tests">
+    Execute the test suite:
+
+    ```bash
+    # Run all unit and integration tests
+    pnpm test
+
+    # Run with verbose output (show all test names)
+    pnpm test:verbose
+
+    # Run with coverage report
+    pnpm test:coverage
+    ```
+
+    <Note>
+      Tests use minimal output by default (dots for passes, details for failures). Use `pnpm test:verbose` for full output.
+    </Note>
+  </Step>
+</Steps>
+
+### Development Database (Optional)
+
+For **local development** with persistent data, you can set up a PostgreSQL database:
+
+<Steps>
+  <Step title="Start PostgreSQL">
+    Use your preferred method:
+
+    <CodeGroup>
+    ```bash Docker
+    docker run -d \
+      --name accountability-postgres \
+      -e POSTGRES_USER=postgres \
+      -e POSTGRES_PASSWORD=postgres \
+      -e POSTGRES_DB=accountability \
+      -p 5432:5432 \
+      postgres:alpine
+    ```
+
+    ```bash Homebrew (macOS)
+    brew install postgresql@16
+    brew services start postgresql@16
+    createdb accountability
+    ```
+
+    ```bash apt (Ubuntu/Debian)
+    sudo apt update
+    sudo apt install postgresql postgresql-contrib
+    sudo systemctl start postgresql
+    sudo -u postgres createdb accountability
+    ```
+    </CodeGroup>
+  </Step>
+
+  <Step title="Configure Connection">
+    Set the `DATABASE_URL` environment variable:
+
+    ```bash .env
+    DATABASE_URL=postgresql://postgres:postgres@localhost:5432/accountability
+    ```
+
+    <Note>
+      The application will use this connection string if provided. Otherwise, it uses the testcontainer instance.
+    </Note>
+  </Step>
+
+  <Step title="Run Migrations">
+    Migrations run automatically when the application starts. You can also run them manually:
+
+    <CodeGroup>
+    ```typescript Migrations are Effect code
+    // packages/persistence/src/Migrations/Migration0001_CreateOrganizations.ts
+    
+    import { SqlClient } from "@effect/sql"
+    import * as Effect from "effect/Effect"
+
+    export default Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+
+      yield* sql`
+        CREATE TABLE organizations (
+          id UUID PRIMARY KEY,
+          name TEXT NOT NULL,
+          reporting_currency CHAR(3) NOT NULL,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          settings JSONB NOT NULL DEFAULT '{}'
+        )
+      `
+    })
+    ```
+    </CodeGroup>
+
+    Available migrations:
+    - `Migration0001_CreateOrganizations` - Organizations table
+    - `Migration0002_CreateCompanies` - Companies table
+    - `Migration0003_CreateAccounts` - Chart of accounts
+    - `Migration0004_CreateFiscalPeriods` - Fiscal periods
+    - `Migration0005_CreateJournalEntries` - Journal entries and lines
+    - `Migration0006_CreateExchangeRates` - Currency exchange rates
+    - `Migration0007_CreateConsolidation` - Consolidation groups
+    - `Migration0008_CreateIntercompany` - Intercompany transactions
+    - `Migration0009_CreateConsolidationRuns` - Consolidation runs
+    - `Migration0010_CreateAuthUsers` - Authentication users
+    - `Migration0011_CreateAuthIdentities` - User identities
+    - `Migration0012_CreateAuthSessions` - User sessions
+    - `Migration0013_CreateAuditLog` - Audit log
+    - `Migration0017_CreateAuthorization` - Authorization policies
+  </Step>
+</Steps>
+
+## Running Tests
+
+Accountability has comprehensive test coverage.
+
+### Unit and Integration Tests
+
+<CodeGroup>
+```bash Run all tests
+pnpm test
+```
+
+```bash Run with verbose output
+pnpm test:verbose
+```
+
+```bash Run with coverage
+pnpm test:coverage
+```
+
+```bash Run specific package tests
+pnpm --filter @accountability/core test
+pnpm --filter @accountability/persistence test
+```
+</CodeGroup>
+
+<Note>
+  Tests use Vitest with Effect testing utilities (`@effect/vitest`). The test suite automatically:
+  - Starts PostgreSQL testcontainer
+  - Runs migrations
+  - Executes tests
+  - Tears down container
+</Note>
+
+### End-to-End Tests
+
+E2E tests use Playwright:
+
+<CodeGroup>
+```bash Run E2E tests (headless)
+pnpm test:e2e
+```
+
+```bash Run with verbose output
+pnpm test:e2e:verbose
+```
+
+```bash Run in headed mode (see browser)
+pnpm test:e2e:headed
+```
+
+```bash Interactive UI mode
+pnpm test:e2e:ui
+```
+
+```bash View test report
+pnpm test:e2e:report
+```
+</CodeGroup>
+
+<Warning>
+  E2E tests require the dev server to be running. Start `pnpm dev` in a separate terminal before running E2E tests.
+</Warning>
+
+## Code Generation
+
+Accountability uses code generation for routes and API clients.
+
+### Generate Routes
+
+TanStack Router uses file-based routing with generated route tree:
+
+```bash
+pnpm generate-routes
+```
+
+This generates `packages/web/src/routeTree.gen.ts` from files in `packages/web/src/routes/`.
+
+<Note>
+  Routes are automatically regenerated during development with HMR. Manual generation is only needed after adding new route files.
+</Note>
+
+### Generate API Client
+
+The typed API client is generated from the OpenAPI spec:
+
+```bash
+cd packages/web
+pnpm generate:api
+```
+
+This generates `packages/web/src/api/schema.ts` from the Effect HttpApi OpenAPI export.
+
+<CodeGroup>
+```typescript Using the generated client
+import { api } from "@/api/client"
+
+// Type-safe API calls
+const { data, error } = await api.GET("/api/v1/organizations")
+
+if (error) {
+  // Handle error (typed)
+  console.error(error)
+  return
+}
+
+// data is fully typed
+for (const org of data.organizations) {
+  console.log(org.id, org.name, org.reportingCurrency)
+}
+```
+</CodeGroup>
+
+## Development Workflow
+
+### Making Changes
+
+<Steps>
+  <Step title="Backend Changes (Effect)">
+    When modifying core business logic:
+
+    1. Edit files in `packages/core/src/`
+    2. Write tests in `packages/core/test/`
+    3. Run tests: `pnpm test`
+    4. Ensure 100% test coverage for new code
+
+    <Note>
+      Backend uses Effect. Read `specs/guides/effect-guide.md` for patterns and best practices.
+    </Note>
+  </Step>
+
+  <Step title="Database Changes">
+    When modifying the database schema:
+
+    1. Create new migration in `packages/persistence/src/Migrations/`
+    2. Name it `Migration####_Description.ts` (next sequential number)
+    3. Write migration using `@effect/sql`
+    4. Export from `packages/persistence/package.json`
+    5. Update repository in `packages/persistence/src/Services/`
+
+    <CodeGroup>
+    ```typescript Migration Template
+    import { SqlClient } from "@effect/sql"
+    import * as Effect from "effect/Effect"
+
+    export default Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient
+
+      yield* sql`
+        -- Your SQL DDL here
+      `
+    })
+    ```
+    </CodeGroup>
+  </Step>
+
+  <Step title="API Changes">
+    When adding/modifying endpoints:
+
+    1. Define schemas in `packages/api/src/schemas/`
+    2. Implement endpoint in `packages/api/src/endpoints/`
+    3. Register in API builder
+    4. Regenerate OpenAPI client: `pnpm generate:api`
+
+    <Note>
+      API uses Effect HttpApi. Read `specs/guides/api-guide.md` for conventions.
+    </Note>
+  </Step>
+
+  <Step title="Frontend Changes">
+    When modifying the UI:
+
+    1. Edit components in `packages/web/src/components/`
+    2. Edit routes in `packages/web/src/routes/`
+    3. Use `api.GET()` / `api.POST()` for API calls
+    4. Use loaders for SSR data fetching
+    5. Write E2E tests in `packages/web/test/e2e/`
+
+    <Note>
+      Frontend uses React + TanStack Start. Read `specs/guides/frontend-guide.md` for patterns.
+    </Note>
+  </Step>
+</Steps>
+
+### Code Quality
+
+<CodeGroup>
+```bash Type checking
+pnpm typecheck
+```
+
+```bash Linting
+pnpm lint
+pnpm lint:fix
+```
+
+```bash Formatting
+pnpm format
+pnpm format:check
+```
+
+```bash Run all checks
+pnpm typecheck && pnpm lint && pnpm test
+```
+</CodeGroup>
+
+## Building for Production
+
+<Steps>
+  <Step title="Build">
+    ```bash
+    pnpm build
+    ```
+
+    This builds the web package for production using Vite and Nitro.
+  </Step>
+
+  <Step title="Preview">
+    Test the production build locally:
+
+    ```bash
+    pnpm preview
+    ```
+
+    Opens on `http://localhost:3000`
+  </Step>
+
+  <Step title="Start Production Server">
+    ```bash
+    pnpm start
+    ```
+
+    Runs the built server (`.output/server/index.mjs`)
+  </Step>
+</Steps>
+
+## Environment Variables
+
+Accountability uses environment variables for configuration:
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `DATABASE_URL` | PostgreSQL connection string | Testcontainer (in tests) |
+| `PORT` | Server port | 3000 |
+| `NODE_ENV` | Environment (development/production) | development |
+| `SESSION_SECRET` | Secret for session signing | (required in production) |
+
+<Warning>
+  Never commit `.env` files to version control. Add them to `.gitignore`.
+</Warning>
+
+## Troubleshooting
+
+### Port Already in Use
+
+```bash
+Error: Port 3000 is already in use
+```
+
+**Solution**: Kill the process or use a different port:
+
+```bash
+# Kill process on port 3000
+lsof -ti:3000 | xargs kill -9
+
+# Or use different port
+PORT=3001 pnpm dev
+```
+
+### Database Connection Failed
+
+```bash
+Error: Connection refused
+```
+
+**Solution**: Ensure PostgreSQL is running (or let testcontainers manage it):
+
+```bash
+# Check if PostgreSQL is running
+psql -U postgres -c "SELECT version();"
+
+# For tests, ensure Docker is running
+docker ps
+```
+
+### Tests Hanging
+
+```bash
+Tests hanging during setup...
+```
+
+**Solution**: Testcontainers needs Docker. Ensure Docker is running:
+
+```bash
+# Start Docker
+sudo systemctl start docker  # Linux
+open -a Docker              # macOS
+```
+
+### Type Errors After API Changes
+
+```bash
+Type error: Property 'newField' does not exist
+```
+
+**Solution**: Regenerate the API client:
+
+```bash
+cd packages/web
+pnpm generate:api
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Effect Guide" icon="book">
+    Learn Effect patterns for backend development
+    
+    `specs/guides/effect-guide.md`
+  </Card>
+  
+  <Card title="Frontend Guide" icon="paintbrush">
+    React and TanStack Start patterns
+    
+    `specs/guides/frontend-guide.md`
+  </Card>
+  
+  <Card title="Testing Guide" icon="flask">
+    Unit, integration, and E2E testing
+    
+    `specs/guides/testing-guide.md`
+  </Card>
+  
+  <Card title="API Guide" icon="code">
+    Effect HttpApi conventions
+    
+    `specs/guides/api-guide.md`
+  </Card>
+</CardGroup>
+
+## Additional Resources
+
+### Read the Specs
+
+All specifications are in the `specs/` directory:
+
+- **Guides**: How-to documentation for development
+- **Architecture**: System design and domain model
+- **Pending**: Features not yet implemented
+- **Completed**: Historical reference for completed work
+
+### Key Files
+
+| File | Purpose |
+|------|----------|
+| `CLAUDE.md` | Claude Code development guide |
+| `package.json` | Workspace scripts and dependencies |
+| `vitest.config.ts` | Test configuration |
+| `tsconfig.json` | TypeScript compiler options |
+
+### External Documentation
+
+- [Effect Documentation](https://effect.website/docs/introduction)
+- [TanStack Start Documentation](https://tanstack.com/start/latest)
+- [TanStack Router Documentation](https://tanstack.com/router/latest)
+- [@effect/sql Documentation](https://effect.website/docs/guides/sql)
+- [Vitest Documentation](https://vitest.dev/)
+- [Playwright Documentation](https://playwright.dev/)
+
+<Note>
+  Reference repositories are available in `repos/` directory:
+  - `repos/effect/` - Effect-TS source code
+  - `repos/tanstack-router/` - TanStack Router/Start source code
+</Note>

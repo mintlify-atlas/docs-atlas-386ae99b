@@ -1,0 +1,372 @@
+---
+title: Consolidation Groups API
+description: Manage consolidation groups and members for parent-subsidiary relationships
+---
+
+# Consolidation Groups API
+
+The Consolidation Groups API provides endpoints for managing consolidation groups - collections of related companies for consolidated financial reporting per ASC 810.
+
+## Base Path
+
+```
+/api/v1/consolidation/groups
+```
+
+All endpoints require authentication with a valid session token.
+
+## Consolidation Groups
+
+A consolidation group defines:
+- **Parent company** - The controlling entity
+- **Members** - Subsidiary/associated companies with ownership percentages
+- **Consolidation method** - Full, Proportionate, or Equity method per ASC 810
+- **Reporting currency** - Currency for consolidated reports
+
+### List Consolidation Groups
+
+Retrieve a paginated list of consolidation groups.
+
+```bash GET /api/v1/consolidation/groups
+curl -X GET "https://your-instance.accountability.app/api/v1/consolidation/groups?organizationId={orgId}&isActive=true" \
+  -H "Authorization: Bearer your-session-token"
+```
+
+<ParamField query="organizationId" type="string" required>
+  Organization UUID
+</ParamField>
+
+<ParamField query="isActive" type="boolean">
+  Filter by active status
+</ParamField>
+
+<ParamField query="limit" type="integer" default="50">
+  Maximum items per page
+</ParamField>
+
+<ParamField query="offset" type="integer" default="0">
+  Number of items to skip
+</ParamField>
+
+<ResponseExample>
+```json
+{
+  "groups": [
+    {
+      "id": "cg_123e4567-e89b-12d3-a456-426614174000",
+      "organizationId": "org_123e4567-e89b-12d3-a456-426614174000",
+      "name": "Acme Consolidated",
+      "reportingCurrency": "USD",
+      "consolidationMethod": "FullConsolidation",
+      "parentCompanyId": "comp_parent_123",
+      "isActive": true,
+      "createdAt": "2025-01-01T00:00:00Z",
+      "updatedAt": "2025-01-01T00:00:00Z"
+    }
+  ],
+  "total": 1,
+  "limit": 50,
+  "offset": 0
+}
+```
+</ResponseExample>
+
+### Get Consolidation Group
+
+Retrieve a single consolidation group with all its members.
+
+```bash GET /api/v1/consolidation/groups/{id}
+curl -X GET "https://your-instance.accountability.app/api/v1/consolidation/groups/{groupId}?organizationId={orgId}" \
+  -H "Authorization: Bearer your-session-token"
+```
+
+<ParamField path="id" type="string" required>
+  Consolidation group UUID
+</ParamField>
+
+<ParamField query="organizationId" type="string" required>
+  Organization UUID
+</ParamField>
+
+<ResponseExample>
+```json
+{
+  "group": {
+    "id": "cg_123e4567-e89b-12d3-a456-426614174000",
+    "organizationId": "org_123e4567-e89b-12d3-a456-426614174000",
+    "name": "Acme Consolidated",
+    "reportingCurrency": "USD",
+    "consolidationMethod": "FullConsolidation",
+    "parentCompanyId": "comp_parent_123",
+    "isActive": true,
+    "createdAt": "2025-01-01T00:00:00Z",
+    "updatedAt": "2025-01-01T00:00:00Z"
+  },
+  "members": [
+    {
+      "consolidationGroupId": "cg_123e4567-e89b-12d3-a456-426614174000",
+      "companyId": "comp_sub1_123",
+      "ownershipPercentage": "100.00",
+      "consolidationMethod": "FullConsolidation",
+      "acquisitionDate": "2023-06-15",
+      "addedAt": "2025-01-01T00:00:00Z"
+    },
+    {
+      "consolidationGroupId": "cg_123e4567-e89b-12d3-a456-426614174000",
+      "companyId": "comp_sub2_123",
+      "ownershipPercentage": "60.00",
+      "consolidationMethod": "ProportionateConsolidation",
+      "acquisitionDate": "2024-01-10",
+      "addedAt": "2025-01-01T00:00:00Z"
+    }
+  ]
+}
+```
+</ResponseExample>
+
+### Create Consolidation Group
+
+Create a new consolidation group with initial members.
+
+```bash POST /api/v1/consolidation/groups
+curl -X POST "https://your-instance.accountability.app/api/v1/consolidation/groups" \
+  -H "Authorization: Bearer your-session-token" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "organizationId": "org_123e4567-e89b-12d3-a456-426614174000",
+    "name": "Acme Consolidated",
+    "reportingCurrency": "USD",
+    "consolidationMethod": "FullConsolidation",
+    "parentCompanyId": "comp_parent_123",
+    "members": [
+      {
+        "companyId": "comp_sub1_123",
+        "ownershipPercentage": "100.00",
+        "consolidationMethod": "FullConsolidation",
+        "acquisitionDate": "2023-06-15"
+      }
+    ]
+  }'
+```
+
+<ParamField body="organizationId" type="string" required>
+  Organization UUID
+</ParamField>
+
+<ParamField body="name" type="string" required>
+  Consolidation group name
+</ParamField>
+
+<ParamField body="reportingCurrency" type="string" required>
+  ISO 4217 currency code for consolidated reports
+</ParamField>
+
+<ParamField body="consolidationMethod" type="enum" required>
+  Default consolidation method:
+  - `FullConsolidation` - 100% of assets/liabilities, with NCI for < 100% ownership
+  - `ProportionateConsolidation` - Proportionate share based on ownership %
+  - `EquityMethod` - Investment account with equity pickup
+</ParamField>
+
+<ParamField body="parentCompanyId" type="string" required>
+  Parent company UUID (controlling entity)
+</ParamField>
+
+<ParamField body="members" type="array" required>
+  Array of member companies
+  
+  Each member requires:
+  - `companyId` (string, required): Company UUID
+  - `ownershipPercentage` (string, required): Ownership % (0.00-100.00)
+  - `consolidationMethod` (enum, required): Consolidation method for this member
+  - `acquisitionDate` (string, optional): Date of acquisition (ISO 8601: YYYY-MM-DD)
+</ParamField>
+
+### Update Consolidation Group
+
+Update group details (name, currency, or default method).
+
+```bash PUT /api/v1/consolidation/groups/{id}
+curl -X PUT "https://your-instance.accountability.app/api/v1/consolidation/groups/{groupId}?organizationId={orgId}" \
+  -H "Authorization: Bearer your-session-token" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "Updated Group Name",
+    "reportingCurrency": "EUR"
+  }'
+```
+
+### Delete Consolidation Group
+
+Delete a consolidation group. Groups with completed runs cannot be deleted.
+
+```bash DELETE /api/v1/consolidation/groups/{id}
+curl -X DELETE "https://your-instance.accountability.app/api/v1/consolidation/groups/{groupId}?organizationId={orgId}" \
+  -H "Authorization: Bearer your-session-token"
+```
+
+<Warning>
+Groups with completed consolidation runs cannot be deleted to preserve audit trail.
+</Warning>
+
+### Activate Consolidation Group
+
+Activate a group for use in consolidation runs.
+
+```bash POST /api/v1/consolidation/groups/{id}/activate
+curl -X POST "https://your-instance.accountability.app/api/v1/consolidation/groups/{groupId}/activate?organizationId={orgId}" \
+  -H "Authorization: Bearer your-session-token"
+```
+
+### Deactivate Consolidation Group
+
+Deactivate a group. Deactivated groups cannot be used in new consolidation runs.
+
+```bash POST /api/v1/consolidation/groups/{id}/deactivate
+curl -X POST "https://your-instance.accountability.app/api/v1/consolidation/groups/{groupId}/deactivate?organizationId={orgId}" \
+  -H "Authorization: Bearer your-session-token"
+```
+
+## Group Members
+
+### Add Group Member
+
+Add a new member (company) to a consolidation group.
+
+```bash POST /api/v1/consolidation/groups/{id}/members
+curl -X POST "https://your-instance.accountability.app/api/v1/consolidation/groups/{groupId}/members?organizationId={orgId}" \
+  -H "Authorization: Bearer your-session-token" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "companyId": "comp_sub3_123",
+    "ownershipPercentage": "75.00",
+    "consolidationMethod": "FullConsolidation",
+    "acquisitionDate": "2025-03-01"
+  }'
+```
+
+<ParamField body="companyId" type="string" required>
+  Company UUID to add
+</ParamField>
+
+<ParamField body="ownershipPercentage" type="string" required>
+  Ownership percentage (0.00-100.00)
+</ParamField>
+
+<ParamField body="consolidationMethod" type="enum" required>
+  Consolidation method: `FullConsolidation`, `ProportionateConsolidation`, `EquityMethod`
+</ParamField>
+
+<ParamField body="acquisitionDate" type="string">
+  Date of acquisition (ISO 8601: YYYY-MM-DD)
+</ParamField>
+
+### Update Group Member
+
+Update a member's ownership percentage or consolidation method.
+
+```bash PUT /api/v1/consolidation/groups/{id}/members/{companyId}
+curl -X PUT "https://your-instance.accountability.app/api/v1/consolidation/groups/{groupId}/members/{companyId}?organizationId={orgId}" \
+  -H "Authorization: Bearer your-session-token" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "ownershipPercentage": "80.00",
+    "consolidationMethod": "FullConsolidation"
+  }'
+```
+
+### Remove Group Member
+
+Remove a member from a consolidation group.
+
+```bash DELETE /api/v1/consolidation/groups/{id}/members/{companyId}
+curl -X DELETE "https://your-instance.accountability.app/api/v1/consolidation/groups/{groupId}/members/{companyId}?organizationId={orgId}" \
+  -H "Authorization: Bearer your-session-token"
+```
+
+## Consolidation Methods Reference
+
+<AccordionGroup>
+  <Accordion title="Full Consolidation">
+    **Use when:** Parent owns > 50% (control)
+    
+    **Accounting treatment:**
+    - 100% of subsidiary's assets, liabilities, revenue, expenses
+    - Non-controlling interest (NCI) for minority ownership
+    - Full intercompany eliminations required
+    
+    **Example:** Parent owns 75% of Sub A
+    - Consolidate 100% of Sub A's financials
+    - Show 25% NCI in equity
+  </Accordion>
+  
+  <Accordion title="Proportionate Consolidation">
+    **Use when:** Joint venture or significant influence (20-50%)
+    
+    **Accounting treatment:**
+    - Parent's proportionate share of assets, liabilities, revenue, expenses
+    - No NCI calculation
+    - Proportionate intercompany eliminations
+    
+    **Example:** Parent owns 40% of Joint Venture B
+    - Consolidate 40% of JV B's financials
+  </Accordion>
+  
+  <Accordion title="Equity Method">
+    **Use when:** Significant influence (20-50%) or investment in associate
+    
+    **Accounting treatment:**
+    - Single line item: Investment in Associate
+    - Equity pickup: Share of net income
+    - No detailed line-by-line consolidation
+    
+    **Example:** Parent owns 30% of Associate C
+    - Investment account adjusted for 30% of C's net income
+  </Accordion>
+</AccordionGroup>
+
+## Error Responses
+
+<AccordionGroup>
+  <Accordion title="Consolidation Group Not Found (404)">
+    ```json
+    {
+      "_tag": "ConsolidationGroupNotFoundError",
+      "consolidationGroupId": "cg_123e4567-e89b-12d3-a456-426614174000",
+      "message": "Consolidation group not found"
+    }
+    ```
+  </Accordion>
+  
+  <Accordion title="Member Already Exists (409)">
+    ```json
+    {
+      "_tag": "ConsolidationMemberAlreadyExistsError",
+      "companyId": "comp_sub1_123",
+      "consolidationGroupId": "cg_123e4567-e89b-12d3-a456-426614174000",
+      "message": "Company is already a member of this consolidation group"
+    }
+    ```
+  </Accordion>
+  
+  <Accordion title="Group Has Completed Runs (409)">
+    ```json
+    {
+      "_tag": "ConsolidationGroupHasCompletedRunsError",
+      "consolidationGroupId": "cg_123e4567-e89b-12d3-a456-426614174000",
+      "completedRunCount": 5,
+      "message": "Cannot delete consolidation group with 5 completed runs"
+    }
+    ```
+  </Accordion>
+  
+  <Accordion title="Group Inactive (400)">
+    ```json
+    {
+      "_tag": "ConsolidationGroupInactiveError",
+      "consolidationGroupId": "cg_123e4567-e89b-12d3-a456-426614174000",
+      "message": "Consolidation group is inactive and cannot be used in new runs"
+    }
+    ```
+  </Accordion>
+</AccordionGroup>

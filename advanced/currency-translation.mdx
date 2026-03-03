@@ -1,0 +1,468 @@
+---
+title: 'Currency Translation'
+description: 'Understand currency translation methods for multi-currency consolidation'
+---
+
+# Currency Translation
+
+When consolidating companies that operate in different currencies, you must translate each member's financial statements from their functional currency to the consolidation group's reporting currency. This process follows ASC 830 (Foreign Currency Matters) and is a critical step in the consolidation workflow.
+
+## Translation vs. Remeasurement
+
+It's important to understand the distinction:
+
+### Translation
+
+**Purpose**: Convert from functional currency to reporting currency.
+
+**When**: When a company's functional currency differs from the reporting currency.
+
+**Impact**: Translation adjustments go to **Other Comprehensive Income (OCI)** as Cumulative Translation Adjustment (CTA).
+
+**Example**: UK subsidiary with GBP functional currency being consolidated into USD reporting currency.
+
+### Remeasurement
+
+**Purpose**: Convert from non-functional currency to functional currency.
+
+**When**: When transactions are recorded in a currency other than the functional currency.
+
+**Impact**: Remeasurement gains/losses go to **Net Income** (P&L).
+
+**Example**: UK company with USD functional currency (not GBP) remeasuring GBP transactions.
+
+<Info>
+This guide focuses on **translation** for consolidation. Remeasurement is handled separately during transaction recording.
+</Info>
+
+## Determining Functional Currency
+
+Per ASC 830, each company must identify its **functional currency** - the currency of the primary economic environment in which it operates.
+
+### Indicators of Functional Currency
+
+Consider these factors:
+
+**Cash Flows**:
+- Which currency generates and expends cash?
+- Are cash flows primarily in local currency or parent's currency?
+
+**Sales Prices**:
+- What currency are sales prices denominated in?
+- Are prices responsive to local competition or driven by parent?
+
+**Sales Market**:
+- Where is the primary sales market?
+- Local country or international/parent's country?
+
+**Expenses**:
+- What currency are labor, materials, and other costs denominated in?
+- Local or parent's currency?
+
+**Financing**:
+- What currency is debt denominated in?
+- How are funds generated - locally or from parent?
+
+**Intercompany Transactions**:
+- High or low volume of intercompany transactions?
+- Are operations relatively self-contained or integrated with parent?
+
+<Note>
+Functional currency determination is a **one-time** assessment that should only change when there's a significant change in economic facts and circumstances. Document the determination with supporting analysis.
+</Note>
+
+## Translation Rates Per ASC 830
+
+Different types of accounts use different exchange rates:
+
+### Closing Rate (Balance Sheet Date)
+
+**Used for**:
+- Assets (all types)
+- Liabilities (all types)
+
+**Rate**: Spot rate at the balance sheet date (e.g., December 31, 2025).
+
+**Rationale**: Assets and liabilities represent current financial position, so use the current rate.
+
+### Average Rate (Period Average)
+
+**Used for**:
+- Revenue (all types)
+- Expenses (all types)
+
+**Rate**: Weighted average rate for the period.
+
+**Rationale**: Income and expenses occur throughout the period, so an average rate best represents the economic impact.
+
+<Info>
+The average rate can be a simple average of beginning and ending rates, or a weighted average if exchange rates fluctuate significantly during the period.
+</Info>
+
+### Historical Rate (Transaction Date)
+
+**Used for**:
+- Capital Stock (equity)
+- Additional Paid-In Capital (equity)
+- Treasury Stock (equity)
+
+**Rate**: Rate on the date the transaction occurred (e.g., when stock was issued).
+
+**Rationale**: These accounts represent historical transactions that should maintain their original translated value.
+
+### Calculated (Not Directly Translated)
+
+**Used for**:
+- Retained Earnings
+- Cumulative Translation Adjustment (CTA)
+
+**Calculation**: These are calculated to make the balance sheet balance, not directly translated.
+
+## Retained Earnings Calculation
+
+Retained earnings is **calculated**, not directly translated:
+
+```
+Retained Earnings (ending) = 
+  Retained Earnings (opening, translated)
+  + Net Income (translated at average rate)
+  - Dividends (translated at rate on declaration date)
+```
+
+**Example**:
+- Opening RE: £500,000 × 1.35 (prior period rate) = $675,000
+- Net Income: £100,000 × 1.30 (average rate) = $130,000
+- Dividends: £25,000 × 1.28 (declaration date rate) = $32,000
+- **Closing RE** = $675,000 + $130,000 - $32,000 = **$773,000**
+
+<Note>
+This calculation maintains continuity from period to period. Opening retained earnings is always the prior period's closing retained earnings.
+</Note>
+
+## Cumulative Translation Adjustment (CTA)
+
+CTA is the "plug" amount that makes the translated balance sheet balance.
+
+### Why CTA Exists
+
+Because different rates are used for different accounts, the accounting equation won't balance after translation:
+
+```
+Assets (at closing rate) ≠ Liabilities (at closing rate) + Equity (at historical/calculated rates)
+```
+
+CTA is the balancing amount that makes **Assets = Liabilities + Equity**.
+
+### CTA Calculation
+
+```
+CTA = Total Translated Assets
+    - Total Translated Liabilities  
+    - Total Translated Equity (excluding CTA)
+```
+
+**Example**:
+- Total Assets (closing rate): $5,000,000
+- Total Liabilities (closing rate): $3,000,000
+- Equity excluding CTA: $1,900,000
+  - Capital Stock (historical): $1,000,000
+  - Retained Earnings (calculated): $900,000
+- **CTA** = $5,000,000 - $3,000,000 - $1,900,000 = **$100,000**
+
+### CTA Movement
+
+The **current period CTA movement** is the change from opening to closing CTA:
+
+```
+Current Period CTA = Closing CTA - Opening CTA
+```
+
+This amount is reported in **Other Comprehensive Income (OCI)** on the consolidated financial statements.
+
+<Info>
+CTA accumulates over time in the equity section of the consolidated balance sheet under "Accumulated Other Comprehensive Income."
+</Info>
+
+## Translation Process in Consolidation
+
+During the consolidation run, the currency translation step:
+
+<Steps>
+
+### Retrieve member trial balance
+
+Obtain the trial balance for each member company in their functional currency.
+
+### Determine translation rates
+
+Identify the appropriate rates:
+- **Closing rate**: Spot rate at the balance sheet date
+- **Average rate**: Period average rate
+- **Historical rates**: Rates for equity capital accounts (from issuance dates)
+
+### Classify each account
+
+Determine the translation category for each account:
+- Monetary Asset → Closing rate
+- Monetary Liability → Closing rate
+- Capital Stock → Historical rate
+- Retained Earnings → Calculated
+- Revenue → Average rate
+- Expense → Average rate
+
+### Translate line items
+
+For each account:
+```
+Translated Amount = Functional Currency Amount × Exchange Rate
+```
+
+### Calculate retained earnings
+
+Use the formula:
+```
+RE = Opening RE (translated) + Net Income (avg rate) - Dividends (div rate)
+```
+
+### Calculate CTA
+
+Determine the balancing amount:
+```
+CTA = Assets - Liabilities - Equity (ex CTA)
+```
+
+### Generate translated trial balance
+
+Produce a complete trial balance in the reporting currency, including:
+- All translated line items
+- Calculated retained earnings
+- Current period CTA movement
+
+</Steps>
+
+## Translation Example
+
+### Scenario
+
+**Company**: UK Subsidiary Ltd.
+**Functional Currency**: GBP
+**Reporting Currency**: USD
+**Period**: Year ending December 31, 2025
+
+**Exchange Rates**:
+- Opening rate (Jan 1, 2025): 1 GBP = 1.35 USD
+- Closing rate (Dec 31, 2025): 1 GBP = 1.30 USD
+- Average rate (2025): 1 GBP = 1.32 USD
+- Capital stock issuance (2020): 1 GBP = 1.40 USD
+
+### Balance Sheet Translation
+
+| Account | GBP | Rate | USD |
+|---------|-----|------|-----|
+| **Assets** | | | |
+| Cash | £100,000 | 1.30 (closing) | $130,000 |
+| Accounts Receivable | £200,000 | 1.30 (closing) | $260,000 |
+| Inventory | £150,000 | 1.30 (closing) | $195,000 |
+| Fixed Assets (net) | £550,000 | 1.30 (closing) | $715,000 |
+| **Total Assets** | **£1,000,000** | | **$1,300,000** |
+| | | | |
+| **Liabilities** | | | |
+| Accounts Payable | £150,000 | 1.30 (closing) | $195,000 |
+| Long-term Debt | £300,000 | 1.30 (closing) | $390,000 |
+| **Total Liabilities** | **£450,000** | | **$585,000** |
+| | | | |
+| **Equity** | | | |
+| Capital Stock | £250,000 | 1.40 (historical) | $350,000 |
+| Retained Earnings | £300,000 | calculated | $365,000* |
+| CTA | £0 | calculated | $0** |
+| **Total Equity** | **£550,000** | | **$715,000** |
+| **Total L + E** | **£1,000,000** | | **$1,300,000** |
+
+*Retained earnings calculated (see income statement below).
+**CTA calculated as balancing amount.
+
+### Income Statement Translation
+
+| Account | GBP | Rate | USD |
+|---------|-----|------|-----|
+| Revenue | £500,000 | 1.32 (average) | $660,000 |
+| Cost of Goods Sold | (£300,000) | 1.32 (average) | ($396,000) |
+| Operating Expenses | (£100,000) | 1.32 (average) | ($132,000) |
+| **Net Income** | **£100,000** | | **$132,000** |
+
+### Retained Earnings Calculation
+
+```
+Opening RE (translated):  £300,000 × 1.35 = $405,000
+Add: Net Income (avg):    £100,000 × 1.32 = $132,000
+Less: Dividends:          £50,000 × 1.30 =  ($65,000)
+Closing RE:                                 $472,000
+```
+
+Wait, there's a discrepancy! Let's recalculate:
+
+### CTA Calculation
+
+Given:
+- Total Assets: $1,300,000
+- Total Liabilities: $585,000
+- Capital Stock: $350,000
+- Retained Earnings (from calc): $472,000
+
+Check:
+```
+Assets = $1,300,000
+L + E = $585,000 + $350,000 + $472,000 = $1,407,000
+```
+
+Imbalance = $1,300,000 - $1,407,000 = **-$107,000**
+
+This $107,000 is the **CTA** (negative, meaning a loss).
+
+**Adjusted Balance Sheet Equity**:
+- Capital Stock: $350,000
+- Retained Earnings: $472,000
+- CTA: -$107,000
+- **Total Equity**: $715,000 ✓
+
+<Note>
+The CTA of -$107,000 reflects the unfavorable impact of the weakening GBP (from 1.35 to 1.30) on the net assets of the subsidiary. This loss goes to OCI, not net income.
+</Note>
+
+## Highly Inflationary Economies
+
+Per ASC 830, an economy is **highly inflationary** when cumulative inflation exceeds **100% over 3 years**.
+
+### Special Rules for Highly Inflationary Economies
+
+If a subsidiary operates in a highly inflationary economy:
+
+1. **Use parent's reporting currency as functional currency** - The local currency is too unstable
+2. **Remeasure (don't translate)** - Apply remeasurement rules, not translation
+3. **Gains/losses to P&L** - Impact goes to net income, not OCI
+
+**Examples**: Argentina, Venezuela, Zimbabwe (at various times)
+
+<Warning>
+Highly inflationary accounting requires special procedures. Consult with accounting professionals familiar with ASC 830 highly inflationary rules if your subsidiaries operate in affected countries.
+</Warning>
+
+## Translation Best Practices
+
+<AccordionGroup>
+
+<Accordion title="Document functional currency determinations">
+Maintain written documentation of functional currency determinations for each entity, including the factors considered and weighting of each indicator.
+</Accordion>
+
+<Accordion title="Use consistent rate sources">
+Establish a single authoritative source for exchange rates (e.g., Federal Reserve, ECB) and use it consistently for all entities and periods.
+</Accordion>
+
+<Accordion title="Calculate weighted average rates">
+If exchange rates fluctuate significantly during the period, calculate a weighted average rate based on transaction volumes rather than a simple average.
+</Accordion>
+
+<Accordion title="Track historical rates for equity transactions">
+Maintain a historical rate schedule for all equity transactions (stock issuances, capital contributions). These rates are used period after period.
+</Accordion>
+
+<Accordion title="Reconcile CTA movements">
+Quarterly reconcile CTA movements to understand the drivers. Large unexpected movements may indicate errors in translation rates or account classification.
+</Accordion>
+
+<Accordion title="Monitor for highly inflationary economies">
+Track inflation rates for all countries where subsidiaries operate. When cumulative 3-year inflation approaches 100%, prepare to change accounting treatment.
+</Accordion>
+
+</AccordionGroup>
+
+## Translation Rates Setup
+
+To support currency translation during consolidation:
+
+### Maintain Exchange Rate Tables
+
+For each currency pair (e.g., GBP/USD):
+- **Closing rates**: End-of-period spot rates
+- **Average rates**: Period average rates
+- **Historical rates**: Rates on transaction dates (for equity accounts)
+
+### Rate Types in the System
+
+```typescript
+interface ExchangeRate {
+  fromCurrency: string  // e.g., "GBP"
+  toCurrency: string    // e.g., "USD"
+  rate: Decimal         // e.g., 1.30
+  effectiveDate: string // ISO date
+  rateType: "Spot" | "Average" | "Historical" | "Closing"
+}
+```
+
+### Historical Rate Tracking
+
+For capital accounts, track the issuance date rate:
+
+```typescript
+interface HistoricalRate {
+  accountNumber: string
+  transactionDate: string
+  rate: Decimal
+}
+```
+
+<Info>
+The system automatically retrieves the appropriate rate based on account classification and transaction date during the translation step.
+</Info>
+
+## Troubleshooting Translation Issues
+
+<AccordionGroup>
+
+<Accordion title="Balance sheet doesn't balance after translation">
+This is **expected**! The CTA is the plug that makes it balance. If CTA seems unreasonably large:
+- Verify exchange rates are correct
+- Check that historical rates are properly applied to equity accounts
+- Ensure retained earnings calculation is accurate
+</Accordion>
+
+<Accordion title="CTA is much larger than expected">
+**Check**:
+- Correct closing and average rates were used
+- Historical rates for equity accounts are correct (from original issuance dates)
+- No accounts are misclassified (e.g., equity account using closing rate instead of historical)
+- Net asset position is accurate
+</Accordion>
+
+<Accordion title="Translation rate not found error">
+**Verify**:
+- Exchange rates exist for the consolidation date
+- Rates exist for the correct currency pair (member's functional → reporting currency)
+- Historical rates are recorded for all equity capital accounts
+</Accordion>
+
+<Accordion title="Net income doesn't match after translation">
+Net income **should not match** when translated at the average rate vs. adding up individual revenue/expense lines. This is due to:
+- Different rates for different line items
+- Timing of transactions within the period
+- Weighted vs. simple average rates
+
+The translated net income from the income statement flows to retained earnings.
+</Accordion>
+
+</AccordionGroup>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Consolidation" icon="layer-group" href="/advanced/consolidation">
+    Run the full consolidation process
+  </Card>
+  <Card title="Exchange Rates" icon="money-bill-transfer" href="/api/exchange-rates">
+    Manage exchange rates for translation
+  </Card>
+  <Card title="Companies" icon="building" href="/features/companies">
+    Configure company functional currencies
+  </Card>
+</CardGroup>

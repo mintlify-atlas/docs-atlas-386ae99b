@@ -1,0 +1,650 @@
+---
+title: Error Handling
+description: Error architecture, patterns, and best practices across all layers
+---
+
+## Overview
+
+Accountability uses a **three-layer error architecture** with typed errors flowing from persistence → domain → API → frontend.
+
+```
+Persistence Errors      →  Domain Errors        →  API Errors         →  Frontend Errors
+PersistenceError          AccountNotFound        404 Not Found         "Account not found"
+SqlError                  ValidationError        422 Invalid           "Invalid account data"
+ConnectionError           UnauthorizedError      401 Unauthorized      "Please sign in"
+```
+
+<Info>
+  **Key Principle**: Errors are **values** in Effect, not exceptions. They're tracked in the type signature `Effect<Success, Error, Requirements>`.
+</Info>
+
+## Domain Errors (Core Package)
+
+### Schema.TaggedError
+
+All domain errors use `Schema.TaggedError` for type safety:
+
+```typescript
+import * as Schema from "effect/Schema"
+
+export class AccountNotFound extends Schema.TaggedError<AccountNotFound>()()
+  "AccountNotFound",
+  { accountId: AccountId }
+) {
+  get message(): string {
+    return `Account not found: ${this.accountId}`
+  }
+}
+
+export class ValidationError extends Schema.TaggedError<ValidationError>()()
+  "ValidationError",
+  { message: Schema.String, field: Schema.Option(Schema.String) }
+) {}
+
+export class PeriodClosedError extends Schema.TaggedError<PeriodClosedError>()()
+  "PeriodClosedError",
+  { periodId: FiscalPeriodId, periodName: Schema.String }
+) {
+  get message(): string {
+    return `Cannot post entries to closed period: ${this.periodName}`
+  }
+}
+
+export class EntryNotBalanced extends Schema.TaggedError<EntryNotBalanced>()()
+  "EntryNotBalanced",
+  { debits: MonetaryAmount, credits: MonetaryAmount }
+) {
+  get message(): string {
+    return `Entry is not balanced: debits=${this.debits}, credits=${this.credits}`
+  }
+}
+```
+
+### Type Guards
+
+```typescript
+// Automatic type guard
+export const isAccountNotFound = Schema.is(AccountNotFound)
+
+// Usage
+if (isAccountNotFound(error)) {
+  console.log(`Account ${error.accountId} not found`)
+}
+```
+
+### Union Error Types
+
+```typescript
+export type AccountError =
+  | AccountNotFound
+  | ValidationError
+  | PersistenceError
+
+export type JournalEntryError =
+  | JournalEntryNotFound
+  | ValidationError
+  | PeriodClosedError
+  | EntryNotBalanced
+  | PersistenceError
+
+// Use in service signatures
+interface AccountService {
+  readonly findById: (
+    id: AccountId
+  ) => Effect.Effect<Account, AccountError>
+}
+```
+
+## Persistence Errors
+
+### Repository Errors
+
+```typescript
+// packages/persistence/src/Errors/RepositoryError.ts
+export class PersistenceError extends Schema.TaggedError<PersistenceError>()()
+  "PersistenceError",
+  {
+    operation: Schema.String,
+    cause: Schema.Unknown
+  }
+) {}
+
+export class EntityNotFoundError extends Schema.TaggedError<EntityNotFoundError>()()
+  "EntityNotFoundError",
+  {
+    entity: Schema.String,
+    id: Schema.String
+  }
+) {
+  get message(): string {
+    return `${this.entity} not found: ${this.id}`
+  }
+}
+
+export class DuplicateKeyError extends Schema.TaggedError<DuplicateKeyError>()()
+  "DuplicateKeyError",
+  {
+    entity: Schema.String,
+    key: Schema.String
+  }
+) {
+  get message(): string {
+    return `${this.entity} already exists: ${this.key}`
+  }
+}
+
+export class ConstraintViolationError extends Schema.TaggedError<ConstraintViolationError>()()
+  "ConstraintViolationError",
+  {
+    constraint: Schema.String,
+    detail: Schema.String
+  }
+) {}
+```
+
+### Mapping SQL Errors
+
+```typescript
+const create = (account: Account) =>
+  sql`
+    INSERT INTO accounts ${sql.insert(account)}
+    RETURNING *
+  `.pipe(
+    SqlSchema.single({ Result: AccountRow }),
+    Effect.map(rowToAccount),
+    Effect.mapError((sqlError) => {
+      // Map PostgreSQL errors to domain errors
+      if (sqlError.message.includes("duplicate key")) {
+        return new DuplicateKeyError({
+          entity: "Account",
+          key: account.accountNumber
+        })
+      }
+      
+      if (sqlError.message.includes("foreign key violation")) {
+        return new ConstraintViolationError({
+          constraint: "company_id",
+          detail: "Company does not exist"
+        })
+      }
+      
+      return new PersistenceError({
+        operation: "create account",
+        cause: sqlError
+      })
+    })
+  )
+```
+
+## API Errors
+
+### HTTP Status Code Mapping
+
+```typescript
+// packages/api/src/Definitions/ApiErrors.ts
+import { HttpApiSchema } from "@effect/platform"
+
+export class NotFoundError extends HttpApiSchema.EmptyError<NotFoundError>()(
+  { tag: "NotFoundError", status: 404 }
+) {}
+
+export class UnauthorizedError extends HttpApiSchema.EmptyError<UnauthorizedError>()(
+  { tag: "UnauthorizedError", status: 401 }
+) {}
+
+export class ForbiddenError extends HttpApiSchema.EmptyError<ForbiddenError>()(
+  { tag: "ForbiddenError", status: 403 }
+) {}
+
+export class ValidationError extends Schema.TaggedError<ValidationError>()()
+  "ValidationError",
+  { errors: Schema.Array(Schema.String) },
+  HttpApiSchema.annotations({ status: 422 })
+) {}
+
+export class ConflictError extends Schema.TaggedError<ConflictError>()()
+  "ConflictError",
+  { message: Schema.String },
+  HttpApiSchema.annotations({ status: 409 })
+) {}
+
+export class InternalServerError extends Schema.TaggedError<InternalServerError>()()
+  "InternalServerError",
+  { message: Schema.String },
+  HttpApiSchema.annotations({ status: 500 })
+) {}
+```
+
+### API Endpoint Error Handling
+
+```typescript
+// Define endpoint with errors
+const getAccount = HttpApiEndpoint.get("getAccount", "/accounts/:id")
+  .setPath(Schema.Struct({ id: AccountId }))
+  .addSuccess(Account)
+  .addError(NotFoundError, { status: 404 })
+  .addError(UnauthorizedError, { status: 401 })
+
+// Implement handler
+HttpApiBuilder.handle("getAccount", ({ path }) =>
+  Effect.gen(function* () {
+    const service = yield* AccountService
+    const account = yield* service.findById(path.id)
+    
+    return yield* Option.match(account, {
+      onNone: () => Effect.fail(new NotFoundError()),
+      onSome: Effect.succeed
+    })
+  })
+)
+```
+
+### Automatic Error Mapping
+
+```typescript
+// Domain errors automatically map to API errors
+HttpApiBuilder.handle("createAccount", ({ payload }) =>
+  Effect.gen(function* () {
+    const service = yield* AccountService
+    return yield* service.create(payload)
+  }).pipe(
+    // Map domain errors to API errors
+    Effect.mapError((error) => {
+      if (Schema.is(ValidationError)(error)) {
+        return new ValidationError({ errors: [error.message] })
+      }
+      if (Schema.is(DuplicateKeyError)(error)) {
+        return new ConflictError({ message: error.message })
+      }
+      return new InternalServerError({ message: "Internal error" })
+    })
+  )
+)
+```
+
+## Frontend Errors
+
+### API Client Error Handling
+
+```tsx
+import { api } from "@/api/client"
+
+function CreateCompanyForm() {
+  const [error, setError] = useState<string | null>(null)
+  
+  const handleSubmit = async () => {
+    const { data, error: apiError } = await api.POST("/api/v1/companies", {
+      body: formData
+    })
+    
+    if (apiError) {
+      // Handle specific status codes
+      if (apiError.status === 422) {
+        // Validation error
+        setError(apiError.body?.errors?.join(", ") ?? "Invalid input")
+      } else if (apiError.status === 409) {
+        // Conflict
+        setError("Company with this name already exists")
+      } else if (apiError.status === 401) {
+        // Unauthorized
+        router.navigate({ to: "/login" })
+      } else {
+        // Generic error
+        setError("An error occurred. Please try again.")
+      }
+      return
+    }
+    
+    // Success
+    await router.invalidate()
+    router.navigate({ to: `/companies/${data.id}` })
+  }
+  
+  return (
+    <form onSubmit={handleSubmit}>
+      {error && <ErrorMessage>{error}</ErrorMessage>}
+      {/* ... */}
+    </form>
+  )
+}
+```
+
+### User-Friendly Error Messages
+
+```typescript
+const errorMessages: Record<number, string> = {
+  400: "Invalid request. Please check your input.",
+  401: "Your session has expired. Please sign in again.",
+  403: "You don't have permission to perform this action.",
+  404: "The requested resource was not found.",
+  409: "This resource already exists.",
+  422: "Please check your input and try again.",
+  500: "An error occurred. Please try again later.",
+  503: "Service temporarily unavailable. Please try again."
+}
+
+function getErrorMessage(status: number, body?: { message?: string }): string {
+  return body?.message ?? errorMessages[status] ?? "An unexpected error occurred."
+}
+```
+
+### Error Display Components
+
+```tsx
+// ErrorMessage component
+interface ErrorMessageProps {
+  children: React.ReactNode
+}
+
+export function ErrorMessage({ children }: ErrorMessageProps) {
+  return (
+    <div className="rounded-md bg-red-50 border border-red-200 p-4">
+      <div className="flex">
+        <AlertCircle className="h-5 w-5 text-red-400" />
+        <div className="ml-3">
+          <p className="text-sm text-red-700">{children}</p>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ErrorState component (for full-page errors)
+interface ErrorStateProps {
+  title: string
+  description: string
+  action?: React.ReactNode
+}
+
+export function ErrorState({ title, description, action }: ErrorStateProps) {
+  return (
+    <div className="flex flex-col items-center justify-center min-h-screen">
+      <div className="rounded-full bg-red-100 p-4 mb-4">
+        <AlertCircle className="h-8 w-8 text-red-600" />
+      </div>
+      <h3 className="text-lg font-medium text-gray-900 mb-2">{title}</h3>
+      <p className="text-gray-500 text-center max-w-sm mb-6">{description}</p>
+      {action}
+    </div>
+  )
+}
+```
+
+### Global Error Boundary
+
+```tsx
+import { Component, ErrorInfo, ReactNode } from "react"
+
+interface Props {
+  children: ReactNode
+}
+
+interface State {
+  hasError: boolean
+  error: Error | null
+}
+
+export class ErrorBoundary extends Component<Props, State> {
+  constructor(props: Props) {
+    super(props)
+    this.state = { hasError: false, error: null }
+  }
+  
+  static getDerivedStateFromError(error: Error): State {
+    return { hasError: true, error }
+  }
+  
+  componentDidCatch(error: Error, errorInfo: ErrorInfo) {
+    console.error("Error caught by boundary:", error, errorInfo)
+  }
+  
+  render() {
+    if (this.state.hasError) {
+      return (
+        <ErrorState
+          title="Something went wrong"
+          description="An unexpected error occurred. Please refresh the page."
+          action={
+            <Button onClick={() => window.location.reload()}>
+              Refresh Page
+            </Button>
+          }
+        />
+      )
+    }
+    
+    return this.props.children
+  }
+}
+
+// Usage in root
+function App() {
+  return (
+    <ErrorBoundary>
+      <RouterProvider router={router} />
+    </ErrorBoundary>
+  )
+}
+```
+
+## Error Handling Patterns
+
+### catchTag - Handle Specific Error
+
+```typescript
+findAccount(id).pipe(
+  Effect.catchTag("AccountNotFound", (error) =>
+    Effect.succeed(createDefaultAccount())
+  )
+)
+```
+
+### mapError - Transform Error
+
+```typescript
+findAccount(id).pipe(
+  Effect.mapError((error) =>
+    new DomainError({ cause: error, context: "find account" })
+  )
+)
+```
+
+### catchAll - Handle All Errors
+
+```typescript
+findAccount(id).pipe(
+  Effect.catchAll((error) => {
+    if (Schema.is(AccountNotFound)(error)) {
+      return Effect.succeed(null)
+    }
+    if (Schema.is(ValidationError)(error)) {
+      return Effect.fail(new ApiValidationError({ cause: error }))
+    }
+    return Effect.fail(error) // Propagate unknown errors
+  })
+)
+```
+
+### orElse - Fallback Effect
+
+```typescript
+fetchFromPrimary(id).pipe(
+  Effect.orElse(() => fetchFromCache(id)),
+  Effect.orElse(() => Effect.succeed(null))
+)
+```
+
+### Effect.either - Convert to Either&lt;A, E&gt;
+
+```typescript
+const result = yield* Effect.either(riskyOperation())
+
+if (Either.isLeft(result)) {
+  // Handle error
+  console.error(result.left)
+} else {
+  // Handle success
+  console.log(result.right)
+}
+```
+
+## Anti-Patterns
+
+### DON'T Use catchAllCause
+
+<Warning>
+  **NEVER use `Effect.catchAllCause`** - it catches defects (bugs) which should crash the program.
+</Warning>
+
+```typescript
+// WRONG - catches defects (bugs)
+effect.pipe(
+  Effect.catchAllCause((cause) =>
+    Effect.fail(new MyError({ cause: Cause.squash(cause) }))
+  )
+)
+
+// RIGHT - use mapError or catchAll
+effect.pipe(
+  Effect.mapError((error) => new MyError({ cause: error }))
+)
+```
+
+### DON'T Silently Swallow Errors
+
+```typescript
+// WRONG - silently discards errors
+auditLog(entry).pipe(
+  Effect.catchAll(() => Effect.void)
+)
+
+// RIGHT - let error propagate
+auditLog(entry)
+
+// RIGHT - transform error
+auditLog(entry).pipe(
+  Effect.mapError((e) => new AuditError({ cause: e }))
+)
+```
+
+### DON'T Use any or Type Casts
+
+```typescript
+// WRONG
+const error = unknownError as ValidationError
+
+// RIGHT
+if (Schema.is(ValidationError)(unknownError)) {
+  // TypeScript knows it's ValidationError here
+  console.log(unknownError.field)
+}
+```
+
+## Logging and Monitoring
+
+### Effect Logging
+
+```typescript
+import * as Effect from "effect/Effect"
+
+const operation = Effect.gen(function* () {
+  yield* Effect.logInfo("Starting operation")
+  
+  const result = yield* riskyOperation().pipe(
+    Effect.tapError((error) =>
+      Effect.logError(`Operation failed: ${error.message}`)
+    )
+  )
+  
+  yield* Effect.logInfo("Operation completed")
+  return result
+})
+```
+
+### Error Context
+
+```typescript
+findAccount(id).pipe(
+  Effect.withSpan("findAccount", { attributes: { accountId: id } }),
+  Effect.tapError((error) =>
+    Effect.logError(`Failed to find account ${id}`, { error })
+  )
+)
+```
+
+### Sentry Integration (Future)
+
+```typescript
+import * as Sentry from "@sentry/node"
+
+const captureError = (error: unknown) =>
+  Effect.sync(() => {
+    if (error instanceof Error) {
+      Sentry.captureException(error)
+    } else {
+      Sentry.captureMessage(String(error))
+    }
+  })
+
+const operation = riskyOperation().pipe(
+  Effect.tapError(captureError)
+)
+```
+
+## Testing Error Scenarios
+
+### Unit Tests
+
+```typescript
+it.effect("handles account not found", () =>
+  Effect.gen(function* () {
+    const service = yield* AccountService
+    const result = yield* Effect.either(
+      service.findById(AccountId.make("nonexistent"))
+    )
+    
+    expect(Either.isLeft(result)).toBe(true)
+    
+    if (Either.isLeft(result)) {
+      expect(Schema.is(AccountNotFound)(result.left)).toBe(true)
+    }
+  })
+)
+```
+
+### E2E Tests
+
+```typescript
+test("shows error for invalid account number", async ({ authenticatedPage }) => {
+  await authenticatedPage.goto("/accounts/new")
+  
+  await authenticatedPage.fill('[data-testid="account-number-input"]', "invalid")
+  await authenticatedPage.click('[data-testid="submit-button"]')
+  
+  await expect(
+    authenticatedPage.locator('[data-testid="error-message"]')
+  ).toContainText("Invalid account number")
+})
+```
+
+## Summary
+
+**Error Flow**:
+1. **Persistence**: SQL errors → PersistenceError/EntityNotFoundError
+2. **Domain**: Map to business errors (AccountNotFound, ValidationError)
+3. **API**: Map to HTTP errors (404, 422, 500)
+4. **Frontend**: Display user-friendly messages
+
+**Key Rules**:
+- Use `Schema.TaggedError` for all domain errors
+- Never use `catchAllCause` (catches defects)
+- Never silently swallow errors
+- Always forward errors or transform them
+- Map errors appropriately at each layer boundary
+- Display helpful, actionable error messages to users
+
+## Next Steps
+
+- [Effect Framework](/architecture/effect-framework) - Effect error handling patterns
+- [Persistence](/architecture/persistence) - Database error mapping
+- [Testing](/architecture/testing) - Testing error scenarios

@@ -1,0 +1,419 @@
+---
+title: Elimination Rules API
+description: Manage consolidation elimination rules for intercompany transaction elimination per ASC 810
+---
+
+# Elimination Rules API
+
+The Elimination Rules API provides endpoints for managing automatic and manual elimination rules used during consolidation to eliminate intercompany transactions per ASC 810.
+
+## Base Path
+
+```
+/api/v1/elimination-rules
+```
+
+All endpoints require authentication with a valid session token.
+
+## Elimination Rule Concepts
+
+Elimination rules define how to eliminate intercompany transactions during consolidation:
+
+- **Trigger Conditions** - When the rule should execute (account matching, minimum amounts)
+- **Source/Target Accounts** - Which accounts to eliminate from
+- **Debit/Credit Accounts** - Where to post elimination entries
+- **Priority** - Execution order (lower numbers execute first)
+- **Automatic vs Manual** - Auto-run during consolidation or require explicit approval
+
+## Elimination Types
+
+- **IntercompanyReceivablesPayables** - Eliminate reciprocal AR/AP
+- **IntercompanySales** - Eliminate intercompany revenue/expense
+- **IntercompanyProfit** - Eliminate unrealized profit in inventory
+- **IntercompanyDividends** - Eliminate dividend income/expense
+- **IntercompanyInvestment** - Eliminate investment in subsidiary against equity
+- **Custom** - User-defined elimination logic
+
+## List Elimination Rules
+
+Retrieve a paginated list of elimination rules with filtering.
+
+```bash GET /api/v1/elimination-rules
+curl -X GET "https://your-instance.accountability.app/api/v1/elimination-rules?consolidationGroupId={groupId}&isActive=true" \
+  -H "Authorization: Bearer your-session-token"
+```
+
+<ParamField query="consolidationGroupId" type="string">
+  Filter by consolidation group UUID
+</ParamField>
+
+<ParamField query="eliminationType" type="enum">
+  Filter by type: `IntercompanyReceivablesPayables`, `IntercompanySales`, `IntercompanyProfit`, `IntercompanyDividends`, `IntercompanyInvestment`, `Custom`
+</ParamField>
+
+<ParamField query="isActive" type="boolean">
+  Filter by active status
+</ParamField>
+
+<ParamField query="isAutomatic" type="boolean">
+  Filter by automatic execution
+</ParamField>
+
+<ParamField query="highPriorityOnly" type="boolean">
+  Filter to show only high-priority rules (priority < 10)
+</ParamField>
+
+<ParamField query="limit" type="integer" default="50">
+  Maximum items per page
+</ParamField>
+
+<ParamField query="offset" type="integer" default="0">
+  Number of items to skip
+</ParamField>
+
+<ResponseExample>
+```json
+{
+  "rules": [
+    {
+      "id": "er_123e4567-e89b-12d3-a456-426614174000",
+      "consolidationGroupId": "cg_123e4567-e89b-12d3-a456-426614174000",
+      "name": "Eliminate Intercompany AR/AP",
+      "description": "Automatically eliminate reciprocal receivables and payables between group companies",
+      "eliminationType": "IntercompanyReceivablesPayables",
+      "triggerConditions": [
+        {
+          "description": "Accounts Receivable from related parties",
+          "sourceAccounts": [
+            { "accountNumber": "1200", "companyId": null }
+          ],
+          "minimumAmount": "1000.00"
+        }
+      ],
+      "sourceAccounts": [
+        { "accountNumber": "1200", "companyId": null }
+      ],
+      "targetAccounts": [
+        { "accountNumber": "2100", "companyId": null }
+      ],
+      "debitAccountId": "acc_elim_ap",
+      "creditAccountId": "acc_elim_ar",
+      "isAutomatic": true,
+      "priority": 10,
+      "isActive": true,
+      "createdAt": "2025-01-01T00:00:00Z",
+      "updatedAt": "2025-01-01T00:00:00Z"
+    }
+  ],
+  "total": 1,
+  "limit": 50,
+  "offset": 0
+}
+```
+</ResponseExample>
+
+## Get Elimination Rule
+
+Retrieve a single elimination rule by ID.
+
+```bash GET /api/v1/elimination-rules/{id}
+curl -X GET "https://your-instance.accountability.app/api/v1/elimination-rules/{ruleId}" \
+  -H "Authorization: Bearer your-session-token"
+```
+
+<ParamField path="id" type="string" required>
+  Elimination rule UUID
+</ParamField>
+
+## Create Elimination Rule
+
+Create a new elimination rule for a consolidation group.
+
+```bash POST /api/v1/elimination-rules
+curl -X POST "https://your-instance.accountability.app/api/v1/elimination-rules" \
+  -H "Authorization: Bearer your-session-token" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "organizationId": "org_123e4567-e89b-12d3-a456-426614174000",
+    "consolidationGroupId": "cg_123e4567-e89b-12d3-a456-426614174000",
+    "name": "Eliminate Intercompany Sales",
+    "description": "Eliminate revenue/expense from intercompany sales",
+    "eliminationType": "IntercompanySales",
+    "triggerConditions": [
+      {
+        "description": "Intercompany revenue accounts",
+        "sourceAccounts": [
+          { "accountNumber": "4100", "companyId": null }
+        ],
+        "minimumAmount": null
+      }
+    ],
+    "sourceAccounts": [
+      { "accountNumber": "4100", "companyId": null }
+    ],
+    "targetAccounts": [
+      { "accountNumber": "5100", "companyId": null }
+    ],
+    "debitAccountId": "acc_elim_revenue",
+    "creditAccountId": "acc_elim_expense",
+    "isAutomatic": true,
+    "priority": 20,
+    "isActive": true
+  }'
+```
+
+<ParamField body="organizationId" type="string" required>
+  Organization UUID
+</ParamField>
+
+<ParamField body="consolidationGroupId" type="string" required>
+  Consolidation group UUID
+</ParamField>
+
+<ParamField body="name" type="string" required>
+  Rule name
+</ParamField>
+
+<ParamField body="description" type="string">
+  Optional description
+</ParamField>
+
+<ParamField body="eliminationType" type="enum" required>
+  Elimination type: `IntercompanyReceivablesPayables`, `IntercompanySales`, `IntercompanyProfit`, `IntercompanyDividends`, `IntercompanyInvestment`, `Custom`
+</ParamField>
+
+<ParamField body="triggerConditions" type="array" required>
+  Array of conditions that trigger this rule
+  
+  Each condition includes:
+  - `description` (string, required): Condition description
+  - `sourceAccounts` (array, required): Account selectors to match
+  - `minimumAmount` (string): Optional minimum amount threshold
+</ParamField>
+
+<ParamField body="sourceAccounts" type="array" required>
+  Array of account selectors to eliminate from
+  
+  Each selector:
+  - `accountNumber` (string): Account number pattern
+  - `companyId` (string | null): Specific company or null for all
+</ParamField>
+
+<ParamField body="targetAccounts" type="array" required>
+  Array of account selectors to eliminate against
+</ParamField>
+
+<ParamField body="debitAccountId" type="string" required>
+  Account UUID for elimination debit entry
+</ParamField>
+
+<ParamField body="creditAccountId" type="string" required>
+  Account UUID for elimination credit entry
+</ParamField>
+
+<ParamField body="isAutomatic" type="boolean" required>
+  Whether to execute automatically during consolidation runs
+</ParamField>
+
+<ParamField body="priority" type="integer" required>
+  Execution priority (0-999, lower executes first)
+</ParamField>
+
+<ParamField body="isActive" type="boolean" default="true">
+  Whether the rule is active
+</ParamField>
+
+## Bulk Create Elimination Rules
+
+Create multiple elimination rules in a single request.
+
+```bash POST /api/v1/elimination-rules/bulk
+curl -X POST "https://your-instance.accountability.app/api/v1/elimination-rules/bulk" \
+  -H "Authorization: Bearer your-session-token" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "rules": [
+      { /* rule 1 */ },
+      { /* rule 2 */ }
+    ]
+  }'
+```
+
+<Note>
+Useful for setting up standard elimination rule sets for new consolidation groups.
+</Note>
+
+## Update Elimination Rule
+
+Update an existing elimination rule. Only provided fields are updated.
+
+```bash PUT /api/v1/elimination-rules/{id}
+curl -X PUT "https://your-instance.accountability.app/api/v1/elimination-rules/{ruleId}" \
+  -H "Authorization: Bearer your-session-token" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "Updated Rule Name",
+    "description": "Updated description",
+    "isAutomatic": false
+  }'
+```
+
+## Delete Elimination Rule
+
+Delete an elimination rule. Rules used in completed consolidation runs may not be deleted.
+
+```bash DELETE /api/v1/elimination-rules/{id}
+curl -X DELETE "https://your-instance.accountability.app/api/v1/elimination-rules/{ruleId}" \
+  -H "Authorization: Bearer your-session-token"
+```
+
+<Warning>
+Rules that have been used in completed consolidation runs cannot be deleted to preserve audit trail.
+</Warning>
+
+## Activate Elimination Rule
+
+Activate a rule for use in consolidation runs.
+
+```bash POST /api/v1/elimination-rules/{id}/activate
+curl -X POST "https://your-instance.accountability.app/api/v1/elimination-rules/{ruleId}/activate" \
+  -H "Authorization: Bearer your-session-token"
+```
+
+## Deactivate Elimination Rule
+
+Deactivate a rule. Deactivated rules are skipped during consolidation.
+
+```bash POST /api/v1/elimination-rules/{id}/deactivate
+curl -X POST "https://your-instance.accountability.app/api/v1/elimination-rules/{ruleId}/deactivate" \
+  -H "Authorization: Bearer your-session-token"
+```
+
+## Update Rule Priority
+
+Change the execution priority of a rule. Lower numbers execute first.
+
+```bash POST /api/v1/elimination-rules/{id}/priority
+curl -X POST "https://your-instance.accountability.app/api/v1/elimination-rules/{ruleId}/priority" \
+  -H "Authorization: Bearer your-session-token" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "priority": 15
+  }'
+```
+
+<ParamField body="priority" type="integer" required>
+  New priority (0-999, lower executes first)
+</ParamField>
+
+## Get Rules by Type
+
+Get all elimination rules of a specific type for a consolidation group.
+
+```bash GET /api/v1/elimination-rules/by-type
+curl -X GET "https://your-instance.accountability.app/api/v1/elimination-rules/by-type?consolidationGroupId={groupId}&eliminationType=IntercompanySales" \
+  -H "Authorization: Bearer your-session-token"
+```
+
+<ParamField query="consolidationGroupId" type="string" required>
+  Consolidation group UUID
+</ParamField>
+
+<ParamField query="eliminationType" type="enum" required>
+  Elimination type to filter by
+</ParamField>
+
+## Common Elimination Rule Patterns
+
+<AccordionGroup>
+  <Accordion title="Intercompany Receivables/Payables">
+    **Purpose:** Eliminate reciprocal AR and AP between group companies
+    
+    **Accounts:**
+    - Source: Accounts Receivable - Related Parties (1200)
+    - Target: Accounts Payable - Related Parties (2100)
+    
+    **Entry:**
+    - Dr: Accounts Payable - Related Parties
+    - Cr: Accounts Receivable - Related Parties
+    
+    **Priority:** 10 (high priority)
+  </Accordion>
+  
+  <Accordion title="Intercompany Sales">
+    **Purpose:** Eliminate revenue and corresponding cost of sales
+    
+    **Accounts:**
+    - Source: Intercompany Revenue (4100)
+    - Target: Intercompany Cost of Sales (5100)
+    
+    **Entry:**
+    - Dr: Intercompany Revenue
+    - Cr: Intercompany Cost of Sales
+    
+    **Priority:** 20
+  </Accordion>
+  
+  <Accordion title="Unrealized Profit in Inventory">
+    **Purpose:** Eliminate profit on inventory purchased from related parties
+    
+    **Accounts:**
+    - Source: Inventory (1300)
+    - Calculate: Profit margin from intercompany purchases
+    
+    **Entry:**
+    - Dr: Cost of Sales
+    - Cr: Inventory
+    
+    **Priority:** 30
+  </Accordion>
+  
+  <Accordion title="Investment in Subsidiary">
+    **Purpose:** Eliminate parent's investment against subsidiary equity
+    
+    **Accounts:**
+    - Source: Investment in Subsidiary (1500)
+    - Target: Subsidiary Equity accounts (3000-3900)
+    
+    **Entry:**
+    - Dr: Subsidiary Equity
+    - Cr: Investment in Subsidiary
+    
+    **Priority:** 5 (very high priority - do first)
+  </Accordion>
+</AccordionGroup>
+
+## Error Responses
+
+<AccordionGroup>
+  <Accordion title="Elimination Rule Not Found (404)">
+    ```json
+    {
+      "_tag": "EliminationRuleNotFoundError",
+      "eliminationRuleId": "er_123e4567-e89b-12d3-a456-426614174000",
+      "message": "Elimination rule not found"
+    }
+    ```
+  </Accordion>
+  
+  <Accordion title="Operation Failed (500)">
+    ```json
+    {
+      "_tag": "EliminationRuleOperationFailedError",
+      "operation": "create",
+      "reason": "Invalid account selector pattern",
+      "message": "Failed to create elimination rule: Invalid account selector pattern"
+    }
+    ```
+  </Accordion>
+  
+  <Accordion title="Consolidation Group Not Found (404)">
+    ```json
+    {
+      "_tag": "ConsolidationGroupNotFoundError",
+      "consolidationGroupId": "cg_123e4567-e89b-12d3-a456-426614174000",
+      "message": "Consolidation group not found"
+    }
+    ```
+  </Accordion>
+</AccordionGroup>

@@ -1,0 +1,422 @@
+---
+title: Accounts API
+description: Manage the Chart of Accounts with hierarchical account structures
+---
+
+# Accounts API
+
+The Accounts API provides endpoints for managing the Chart of Accounts (COA). Accounts support hierarchical structures with parent-child relationships and multiple account types per US GAAP.
+
+## Base Path
+
+```
+/api/v1/accounts
+```
+
+All endpoints require authentication with a valid session token.
+
+## List Accounts
+
+Retrieve a paginated list of accounts for a company with filtering options.
+
+```bash GET /api/v1/accounts
+curl -X GET "https://your-instance.accountability.app/api/v1/accounts?organizationId={orgId}&companyId={companyId}&limit=50&offset=0" \
+  -H "Authorization: Bearer your-session-token"
+```
+
+<ParamField query="organizationId" type="string" required>
+  Organization UUID
+</ParamField>
+
+<ParamField query="companyId" type="string" required>
+  Company UUID
+</ParamField>
+
+<ParamField query="accountType" type="enum">
+  Filter by account type: `Asset`, `Liability`, `Equity`, `Revenue`, `Expense`
+</ParamField>
+
+<ParamField query="accountCategory" type="enum">
+  Filter by detailed category (e.g., `CurrentAssets`, `NonCurrentAssets`, `CurrentLiabilities`, `Equity`, `OperatingRevenue`, `OperatingExpense`)
+</ParamField>
+
+<ParamField query="isActive" type="boolean">
+  Filter by active status
+</ParamField>
+
+<ParamField query="isPostable" type="boolean">
+  Filter by whether accounts accept journal entry postings
+</ParamField>
+
+<ParamField query="parentAccountId" type="string">
+  Filter by parent account UUID (for hierarchical filtering)
+</ParamField>
+
+<ParamField query="limit" type="integer" default="50">
+  Maximum items per page (max: 100)
+</ParamField>
+
+<ParamField query="offset" type="integer" default="0">
+  Number of items to skip
+</ParamField>
+
+<ResponseExample>
+```json
+{
+  "accounts": [
+    {
+      "id": "acc_123e4567-e89b-12d3-a456-426614174000",
+      "organizationId": "org_123e4567-e89b-12d3-a456-426614174000",
+      "companyId": "comp_123e4567-e89b-12d3-a456-426614174000",
+      "accountNumber": "1000",
+      "name": "Cash - Operating",
+      "description": "Primary operating cash account",
+      "accountType": "Asset",
+      "accountCategory": "CurrentAssets",
+      "normalBalance": "Debit",
+      "parentAccountId": null,
+      "isPostable": true,
+      "isCashFlowRelevant": true,
+      "cashFlowCategory": "OperatingActivities",
+      "isIntercompany": false,
+      "intercompanyPartnerId": null,
+      "currencyRestriction": null,
+      "isActive": true,
+      "isRetainedEarnings": false,
+      "createdAt": "2025-01-15T10:00:00Z",
+      "updatedAt": "2025-01-15T10:00:00Z"
+    }
+  ],
+  "total": 150,
+  "limit": 50,
+  "offset": 0
+}
+```
+</ResponseExample>
+
+## Get Account
+
+Retrieve a single account by ID.
+
+```bash GET /api/v1/accounts/organizations/{organizationId}/accounts/{id}
+curl -X GET "https://your-instance.accountability.app/api/v1/accounts/organizations/{organizationId}/accounts/{accountId}" \
+  -H "Authorization: Bearer your-session-token"
+```
+
+<ParamField path="organizationId" type="string" required>
+  Organization UUID
+</ParamField>
+
+<ParamField path="id" type="string" required>
+  Account UUID
+</ParamField>
+
+<ResponseExample>
+```json
+{
+  "id": "acc_123e4567-e89b-12d3-a456-426614174000",
+  "organizationId": "org_123e4567-e89b-12d3-a456-426614174000",
+  "companyId": "comp_123e4567-e89b-12d3-a456-426614174000",
+  "accountNumber": "1000",
+  "name": "Cash - Operating",
+  "description": "Primary operating cash account",
+  "accountType": "Asset",
+  "accountCategory": "CurrentAssets",
+  "normalBalance": "Debit",
+  "parentAccountId": null,
+  "isPostable": true,
+  "isCashFlowRelevant": true,
+  "cashFlowCategory": "OperatingActivities",
+  "isIntercompany": false,
+  "intercompanyPartnerId": null,
+  "currencyRestriction": null,
+  "isActive": true,
+  "isRetainedEarnings": false,
+  "createdAt": "2025-01-15T10:00:00Z",
+  "updatedAt": "2025-01-15T10:00:00Z"
+}
+```
+</ResponseExample>
+
+## Create Account
+
+Create a new account in the Chart of Accounts.
+
+```bash POST /api/v1/accounts
+curl -X POST "https://your-instance.accountability.app/api/v1/accounts" \
+  -H "Authorization: Bearer your-session-token" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "organizationId": "org_123e4567-e89b-12d3-a456-426614174000",
+    "companyId": "comp_123e4567-e89b-12d3-a456-426614174000",
+    "accountNumber": "1010",
+    "name": "Petty Cash",
+    "description": "Small cash fund for minor expenses",
+    "accountType": "Asset",
+    "accountCategory": "CurrentAssets",
+    "normalBalance": "Debit",
+    "parentAccountId": "acc_123e4567-e89b-12d3-a456-426614174000",
+    "isPostable": true,
+    "isCashFlowRelevant": true,
+    "cashFlowCategory": "OperatingActivities",
+    "isIntercompany": false,
+    "intercompanyPartnerId": null,
+    "currencyRestriction": null,
+    "isRetainedEarnings": false
+  }'
+```
+
+<ParamField body="organizationId" type="string" required>
+  Organization UUID
+</ParamField>
+
+<ParamField body="companyId" type="string" required>
+  Company UUID
+</ParamField>
+
+<ParamField body="accountNumber" type="string" required>
+  Unique account number within the company (e.g., "1000", "4010")
+</ParamField>
+
+<ParamField body="name" type="string" required>
+  Account display name
+</ParamField>
+
+<ParamField body="description" type="string">
+  Optional account description
+</ParamField>
+
+<ParamField body="accountType" type="enum" required>
+  Account type: `Asset`, `Liability`, `Equity`, `Revenue`, `Expense`
+</ParamField>
+
+<ParamField body="accountCategory" type="enum" required>
+  Detailed category for classification. Examples:
+  - Assets: `CurrentAssets`, `NonCurrentAssets`, `FixedAssets`
+  - Liabilities: `CurrentLiabilities`, `NonCurrentLiabilities`, `LongTermDebt`
+  - Equity: `Equity`, `RetainedEarnings`, `OtherComprehensiveIncome`
+  - Revenue: `OperatingRevenue`, `NonOperatingRevenue`
+  - Expense: `OperatingExpense`, `CostOfSales`, `NonOperatingExpense`
+</ParamField>
+
+<ParamField body="normalBalance" type="enum" required>
+  Normal balance side: `Debit` or `Credit`
+</ParamField>
+
+<ParamField body="parentAccountId" type="string">
+  Parent account UUID for hierarchical structure (null for root accounts)
+</ParamField>
+
+<ParamField body="isPostable" type="boolean" required>
+  Whether journal entries can be posted to this account
+</ParamField>
+
+<ParamField body="isCashFlowRelevant" type="boolean" required>
+  Whether this account should appear in cash flow statement
+</ParamField>
+
+<ParamField body="cashFlowCategory" type="enum">
+  Cash flow classification: `OperatingActivities`, `InvestingActivities`, `FinancingActivities`
+</ParamField>
+
+<ParamField body="isIntercompany" type="boolean" required>
+  Whether this is an intercompany account
+</ParamField>
+
+<ParamField body="intercompanyPartnerId" type="string">
+  Related company UUID for intercompany accounts
+</ParamField>
+
+<ParamField body="currencyRestriction" type="string">
+  ISO 4217 currency code if account is restricted to a specific currency
+</ParamField>
+
+<ParamField body="isRetainedEarnings" type="boolean" default="false">
+  Whether this is the retained earnings account (only one per company)
+</ParamField>
+
+## Update Account
+
+Update an existing account. Only provided fields are updated.
+
+```bash PUT /api/v1/accounts/organizations/{organizationId}/accounts/{id}
+curl -X PUT "https://your-instance.accountability.app/api/v1/accounts/organizations/{organizationId}/accounts/{accountId}" \
+  -H "Authorization: Bearer your-session-token" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "Updated Account Name",
+    "description": "Updated description",
+    "isActive": true
+  }'
+```
+
+<ParamField path="organizationId" type="string" required>
+  Organization UUID
+</ParamField>
+
+<ParamField path="id" type="string" required>
+  Account UUID
+</ParamField>
+
+<ParamField body="name" type="string">
+  Updated account name
+</ParamField>
+
+<ParamField body="description" type="string">
+  Updated description (set to null to clear)
+</ParamField>
+
+<ParamField body="parentAccountId" type="string">
+  Update parent account (null to make root account)
+</ParamField>
+
+<ParamField body="isPostable" type="boolean">
+  Update postable status
+</ParamField>
+
+<ParamField body="isCashFlowRelevant" type="boolean">
+  Update cash flow relevance
+</ParamField>
+
+<ParamField body="cashFlowCategory" type="enum">
+  Update cash flow category
+</ParamField>
+
+<ParamField body="isIntercompany" type="boolean">
+  Update intercompany status
+</ParamField>
+
+<ParamField body="intercompanyPartnerId" type="string">
+  Update related company
+</ParamField>
+
+<ParamField body="currencyRestriction" type="string">
+  Update currency restriction (null to remove restriction)
+</ParamField>
+
+<ParamField body="isActive" type="boolean">
+  Activate or deactivate account
+</ParamField>
+
+<ParamField body="isRetainedEarnings" type="boolean">
+  Designate as retained earnings account
+</ParamField>
+
+<Note>
+Account type (`accountType`) and category (`accountCategory`) cannot be changed after creation.
+</Note>
+
+## Deactivate Account
+
+Deactivate an account (soft delete). Accounts with posted transactions or active child accounts cannot be deactivated.
+
+```bash DELETE /api/v1/accounts/organizations/{organizationId}/accounts/{id}
+curl -X DELETE "https://your-instance.accountability.app/api/v1/accounts/organizations/{organizationId}/accounts/{accountId}" \
+  -H "Authorization: Bearer your-session-token"
+```
+
+<ParamField path="organizationId" type="string" required>
+  Organization UUID
+</ParamField>
+
+<ParamField path="id" type="string" required>
+  Account UUID
+</ParamField>
+
+<Warning>
+Accounts with posted transactions or active child accounts cannot be deactivated. You must first deactivate all child accounts.
+</Warning>
+
+## Error Responses
+
+<AccordionGroup>
+  <Accordion title="Account Not Found (404)">
+    ```json
+    {
+      "_tag": "AccountNotFoundError",
+      "accountId": "acc_123e4567-e89b-12d3-a456-426614174000",
+      "message": "Account not found"
+    }
+    ```
+  </Accordion>
+  
+  <Accordion title="Account Number Already Exists (409)">
+    ```json
+    {
+      "_tag": "AccountNumberAlreadyExistsError",
+      "accountNumber": "1000",
+      "companyId": "comp_123e4567-e89b-12d3-a456-426614174000",
+      "message": "Account number '1000' already exists for this company"
+    }
+    ```
+  </Accordion>
+  
+  <Accordion title="Parent Account Not Found (404)">
+    ```json
+    {
+      "_tag": "ParentAccountNotFoundError",
+      "parentAccountId": "acc_123e4567-e89b-12d3-a456-426614174000",
+      "message": "Parent account not found"
+    }
+    ```
+  </Accordion>
+  
+  <Accordion title="Circular Reference (400)">
+    ```json
+    {
+      "_tag": "CircularAccountReferenceError",
+      "accountId": "acc_123e4567-e89b-12d3-a456-426614174000",
+      "parentAccountId": "acc_987e6543-e21b-12d3-a456-426614174000",
+      "message": "Setting this parent would create a circular reference"
+    }
+    ```
+  </Accordion>
+  
+  <Accordion title="Has Active Child Accounts (409)">
+    ```json
+    {
+      "_tag": "HasActiveChildAccountsError",
+      "accountId": "acc_123e4567-e89b-12d3-a456-426614174000",
+      "activeChildCount": 5,
+      "message": "Cannot deactivate account with 5 active child accounts"
+    }
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Account Types Reference
+
+<CardGroup cols={2}>
+  <Card title="Asset" icon="building-columns">
+    Resources owned by the company:
+    - Current Assets (cash, receivables)
+    - Non-Current Assets (equipment, investments)
+    - Fixed Assets (property, equipment)
+  </Card>
+  
+  <Card title="Liability" icon="scale-balanced">
+    Obligations owed by the company:
+    - Current Liabilities (payables, short-term debt)
+    - Non-Current Liabilities (long-term debt)
+  </Card>
+  
+  <Card title="Equity" icon="chart-pie">
+    Owner's residual interest:
+    - Common Stock
+    - Retained Earnings
+    - Other Comprehensive Income
+  </Card>
+  
+  <Card title="Revenue" icon="arrow-trend-up">
+    Income from operations:
+    - Operating Revenue (sales)
+    - Non-Operating Revenue (interest, gains)
+  </Card>
+  
+  <Card title="Expense" icon="arrow-trend-down">
+    Costs of operations:
+    - Cost of Sales
+    - Operating Expenses
+    - Non-Operating Expenses
+  </Card>
+</CardGroup>
