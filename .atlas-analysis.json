@@ -1,0 +1,177 @@
+{
+  "projectType": "saas",
+  "projectName": "Accountability",
+  "projectDescription": "Multi-company, multi-currency accounting application with consolidation and financial reporting capabilities.",
+  "theme": "linden",
+  "primaryColor": "#2563eb",
+  "lightColor": "#3b82f6",
+  "darkColor": "#1e40af",
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Get Started",
+            "pages": [
+              "introduction",
+              "quickstart",
+              "installation"
+            ]
+          },
+          {
+            "group": "Core Features",
+            "pages": [
+              "features/organizations",
+              "features/companies",
+              "features/chart-of-accounts",
+              "features/journal-entries",
+              "features/fiscal-periods",
+              "features/multi-currency"
+            ]
+          },
+          {
+            "group": "Advanced Features",
+            "pages": [
+              "advanced/consolidation",
+              "advanced/elimination-rules",
+              "advanced/intercompany-transactions",
+              "advanced/currency-translation"
+            ]
+          },
+          {
+            "group": "Reporting",
+            "pages": [
+              "reporting/trial-balance",
+              "reporting/balance-sheet",
+              "reporting/income-statement",
+              "reporting/cash-flow",
+              "reporting/consolidated-reports"
+            ]
+          },
+          {
+            "group": "User Management",
+            "pages": [
+              "user-management/authentication",
+              "user-management/authorization",
+              "user-management/invitations"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "API Reference",
+        "groups": [
+          {
+            "group": "Overview",
+            "pages": [
+              "api/overview",
+              "api/authentication"
+            ]
+          },
+          {
+            "group": "Core Endpoints",
+            "pages": [
+              "api/accounts",
+              "api/journal-entries",
+              "api/companies",
+              "api/fiscal-periods"
+            ]
+          },
+          {
+            "group": "Consolidation",
+            "pages": [
+              "api/consolidation-groups",
+              "api/elimination-rules",
+              "api/intercompany-transactions"
+            ]
+          },
+          {
+            "group": "Reporting",
+            "pages": [
+              "api/reports"
+            ]
+          },
+          {
+            "group": "Currency",
+            "pages": [
+              "api/currencies",
+              "api/exchange-rates"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "Architecture",
+        "groups": [
+          {
+            "group": "Technical Overview",
+            "pages": [
+              "architecture/overview",
+              "architecture/tech-stack",
+              "architecture/project-structure"
+            ]
+          },
+          {
+            "group": "Backend",
+            "pages": [
+              "architecture/effect-framework",
+              "architecture/domain-model",
+              "architecture/persistence"
+            ]
+          },
+          {
+            "group": "Frontend",
+            "pages": [
+              "architecture/frontend-architecture",
+              "architecture/ssr-and-routing"
+            ]
+          },
+          {
+            "group": "Development",
+            "pages": [
+              "architecture/testing",
+              "architecture/error-handling"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "Multi-company and multi-currency accounting",
+    "Chart of accounts with US GAAP account categories",
+    "Journal entries with multi-currency support",
+    "Fiscal year and period management",
+    "Consolidation with elimination rules",
+    "Intercompany transaction tracking",
+    "Currency translation and exchange rates",
+    "Financial reporting (Balance Sheet, Income Statement, Cash Flow)",
+    "Consolidated financial statements",
+    "Multi-tenant organization structure",
+    "Role-based authorization with policies",
+    "Audit logging"
+  ],
+  "publicApiSurface": [
+    "POST /api/auth/login - Authenticate user",
+    "POST /api/auth/register - Register new user",
+    "GET /api/organizations - List organizations",
+    "POST /api/organizations - Create organization",
+    "GET /api/companies - List companies",
+    "POST /api/companies - Create company",
+    "GET /api/accounts - List accounts",
+    "POST /api/accounts - Create account",
+    "GET /api/journal-entries - List journal entries",
+    "POST /api/journal-entries - Create journal entry",
+    "GET /api/fiscal-periods - List fiscal periods",
+    "POST /api/fiscal-years - Create fiscal year",
+    "GET /api/currencies - List currencies",
+    "GET /api/exchange-rates - Get exchange rates",
+    "GET /api/consolidation-groups - List consolidation groups",
+    "POST /api/consolidation/run - Run consolidation",
+    "GET /api/reports/trial-balance - Generate trial balance",
+    "GET /api/reports/balance-sheet - Generate balance sheet",
+    "GET /api/reports/income-statement - Generate income statement",
+    "GET /api/reports/cash-flow - Generate cash flow statement"
+  ]
+}
